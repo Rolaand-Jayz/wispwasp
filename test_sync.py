@@ -64,8 +64,12 @@ fan()
 
 items = [prompt_panel.history.item(i).text()
          for i in range(prompt_panel.history.count())]
-check("the Prompt panel lists it", 
-      "a brass diving helmet on a workbench" in items, str(items[:1]))
+# The strip applies the saved style now, exactly as the Prompt page
+# does, so what is recorded is the styled prompt rather than the bare
+# typing. Matching on the start keeps this about "did it arrive".
+check("the Prompt panel lists it",
+      any(entry.startswith("a brass diving helmet on a workbench")
+          for entry in items), str(items[:1]))
 check("the strip cleared itself", live.prompt_box.text() == "")
 
 print("\n=== and one typed in the Prompt panel appears too ===")
@@ -85,7 +89,8 @@ fan()
 items = [prompt_panel.history.item(i).text()
          for i in range(prompt_panel.history.count())]
 check("it is not duplicated", items.count("a copper kettle on a stove") == 1)
-check("but moves to the top", items[0] == "a copper kettle on a stove")
+check("but moves to the top",
+      items[0].startswith("a copper kettle on a stove"), items[0])
 
 print("\n=== the history list is colour coded ===")
 # Three kinds, three colours: red for anything discarded, green for what
@@ -196,7 +201,13 @@ check("the image gets the larger share by default",
 # downgrade for anyone who never drags it.
 check("the history starts taller than the old fixed 74px",
       sizes[1] > 74, f"{sizes[1]}px")
-check("which is room for several entries", sizes[1] >= 96)
+# Was 96. The strip above the prompt box gained a row when the style
+# and overlay choices moved into it, and at this window height Qt takes
+# those pixels from the history rather than the preview, which has a
+# minimum. Still comfortably more than the fixed 74px this replaced,
+# and still two entries.
+check("which is room for several entries", sizes[1] >= 88,
+      f"{sizes[1]}px")
 
 print("\n  dragging it is remembered:")
 live_s.split.setSizes([300, 260])

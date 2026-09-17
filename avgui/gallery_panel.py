@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .dialogs import ConfirmDelete, ConfirmPurge, RenameImage
+from avcore.catalog import model_label
+
 from .filters import DATE_RANGES, SOURCES, Filters
 from .viewer import ImageViewer
 from .widgets import HoverCaption, TriStateFilter
@@ -63,10 +65,18 @@ class Thumb(QWidget):
             stamp = (datetime.fromtimestamp(when).strftime("%d %b, %H:%M")
                      if when else "")
             source = entry.get("source") or ""
+            made_by = model_label(entry.get("backend"), entry.get("model"),
+                                  short=True)
             detail = "   ".join(x for x in (
-                "typed" if source == "manual" else "heard", stamp) if x)
+                "typed" if source == "manual" else "heard", stamp,
+                made_by) if x)
             self.image.set_caption(entry["prompt"], detail)
-            self.image.setToolTip(entry["prompt"])
+            # The full name in the tooltip: a checkpoint name is often
+            # too long for the caption but is exactly what someone wants
+            # when asking "how did I get this one?"
+            full = model_label(entry.get("backend"), entry.get("model"))
+            self.image.setToolTip(
+                f"{entry['prompt']}\n\n{full}" if full else entry["prompt"])
         else:
             # Images made before the catalogue existed, or ones dropped
             # into the folder by hand. Saying so is better than an empty
@@ -477,6 +487,7 @@ class GalleryPanel(QWidget):
         self.next_btn.setEnabled(self._page < pages - 1)
         self.prev_btn.setVisible(pages > 1)
         self.next_btn.setVisible(pages > 1)
+        self._reload_model_filter()
         self._sync_purge()
         viewer = getattr(self, "viewer", None)
         if viewer is not None and viewer.isVisible():
@@ -579,6 +590,19 @@ class GalleryPanel(QWidget):
             lambda _s: self._read_filters())
         row.addWidget(self.censor_only)
 
+        # Filled from the pictures on hand rather than from what is
+        # installed: someone may have deleted a model, or be looking at
+        # images made on another machine, and the question here is what
+        # made these.
+        self.model_filter = QComboBox()
+        self.model_filter.setMinimumWidth(150)
+        self.model_filter.setToolTip("Show only images made by one model")
+        self.model_filter.addItem("Any model", "")
+        self.model_filter.currentIndexChanged.connect(
+            lambda _i: self._read_filters())
+        self.model_filter.hide()
+        row.addWidget(self.model_filter)
+
         self.clear_filters_btn = QPushButton("Clear")
         self.clear_filters_btn.setToolTip("Remove all filters")
         self.clear_filters_btn.clicked.connect(self._clear_filters)
@@ -586,12 +610,36 @@ class GalleryPanel(QWidget):
         row.addWidget(self.clear_filters_btn)
         return bar
 
+    def _reload_model_filter(self):
+        """
+        Offer the models this gallery has actually seen.
+
+        Keeps the current choice if it is still represented: a filter
+        that reset itself whenever a picture arrived would be maddening.
+        Hidden entirely until there is more than one thing to choose
+        between, since a picker with a single option is just clutter.
+        """
+        catalog = getattr(self.engine, "catalog", None)
+        if catalog is None or not hasattr(catalog, "models_used"):
+            return
+        wanted = self.model_filter.currentData() or ""
+        self.model_filter.blockSignals(True)
+        self.model_filter.clear()
+        self.model_filter.addItem("Any model", "")
+        for key, label in catalog.models_used():
+            self.model_filter.addItem(label, key)
+        index = self.model_filter.findData(wanted)
+        self.model_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.model_filter.blockSignals(False)
+        self.model_filter.setVisible(self.model_filter.count() > 2)
+
     def _read_filters(self, *_args):
         self.filters.date = self.date_pick.currentData()
         self.filters.name = self.name_box.text()
         self.filters.prompt = self.prompt_box.text()
         self.filters.source = self.source_pick.currentData() or "any"
         self.filters.kind = self.kind_pick.currentData() or "any"
+        self.filters.model = self.model_filter.currentData() or ""
         # neutral / include / exclude maps to any / only / hide.
         states = {'neutral': 'any', 'include': 'only', 'exclude': 'hide'}
         self.filters.favourites = states[self.fav_only.state()]
@@ -615,6 +663,9 @@ class GalleryPanel(QWidget):
             toggle.blockSignals(True)
             toggle.set_state(TriStateFilter.NEUTRAL)
             toggle.blockSignals(False)
+        self.model_filter.blockSignals(True)
+        self.model_filter.setCurrentIndex(0)
+        self.model_filter.blockSignals(False)
         self._read_filters()
 
     def _apply_filters(self):
@@ -675,7 +726,14 @@ class GalleryPanel(QWidget):
             for item in shown:
                 entry = catalog.lookup(item)
                 if entry and entry.get("prompt"):
-                    captions[item.name] = entry["prompt"]
+                    # The expanded view has room for the model, and it
+                    # is the place someone studies an image closely
+                    # enough to wonder what made it.
+                    made_by = model_label(entry.get("backend"),
+                                          entry.get("model"), short=True)
+                    captions[item.name] = (
+                        f"{entry['prompt']}   -   {made_by}"
+                        if made_by else entry["prompt"])
 
         self.viewer.setGeometry(self._viewer_bounds())
         self.viewer.open_at(shown, index, home, censored, captions)

@@ -56,6 +56,24 @@ def run(log_path):
     except Exception as exc:
         record("silero VAD model is bundled", False, str(exc))
 
+    # --- bundled assets --------------------------------------------------
+    # The icons and the easter-egg clip live in the assets folder. The
+    # spec copies the whole folder, so this is a check that the copy
+    # happened rather than that any one file was listed - which is the
+    # shape of mistake that took QtMultimedia out of a build once.
+    try:
+        from avgui.assets import asset_dir
+
+        folder = asset_dir()
+        icons = list(folder.glob("*.png")) if folder.exists() else []
+        record("bundled assets are present", bool(icons),
+               f"{len(icons)} images in {folder}")
+        clip = folder / "well_do_it_live.wav"
+        record("the version-click clip is bundled", clip.exists(),
+               clip.name if clip.exists() else f"missing from {folder}")
+    except Exception as exc:
+        record("bundled assets are present", False, str(exc))
+
     # --- overlay page ---------------------------------------------------
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     record("overlay.html is bundled", (base / "overlay.html").exists(),

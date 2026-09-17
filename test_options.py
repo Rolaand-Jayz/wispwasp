@@ -245,6 +245,91 @@ check("no pointless copy is made for a live image",
       Path(eng3.snapshot()["image"]) == live)
 eng3.shutdown()
 
+print("\n=== filtering by the model that made each image ===")
+# The list comes from the pictures on hand, not from what is installed:
+# a model may have been deleted, or the images may have come from
+# another machine, and the question here is "what made these".
+from avcore.catalog import UNRECORDED, model_key
+
+mf = tmp / "modelfilter"
+(mf / "out").mkdir(parents=True, exist_ok=True)
+smf = Settings.load(path=mf / "s.json")
+smf.set("paths.overlay_dir", str(mf / "out"))
+smf.set("paths.manual_dir", str(mf / "out"))
+smf.save()
+engmf = Engine(smf)
+engmf.catalog = Catalog(mf / "c.json")
+
+history = [
+    ("one.png", "comfyui", "alpha.safetensors"),
+    ("two.png", "comfyui", "alpha.safetensors"),
+    ("three.png", "comfyui", "beta.safetensors"),
+    ("four.png", "pollinations", ""),
+    ("five.png", "", ""),
+]
+for index, (name, backend, model) in enumerate(history):
+    path = mf / "out" / name
+    write_png(path, 48, 48, (80, 120, 160))
+    os.utime(path, (time.time() - index * 60,) * 2)
+    engmf.catalog.record(path, f"prompt {index}", source="live",
+                         backend=backend, model=model)
+
+seen = dict(engmf.catalog.models_used())
+check("every model in the history is offered", len(seen) == 4,
+      str(sorted(seen.values())))
+check("a local model is keyed by its file",
+      "alpha.safetensors" in seen)
+check("online work is keyed by the backend", "pollinations" in seen)
+check("and images from before this was recorded have their own key",
+      UNRECORDED in seen,
+      "sharing the empty key with 'any model' made choosing it do nothing")
+
+gmf = GalleryPanel(engmf)
+app.processEvents()
+check("the picker appears when there is a choice",
+      not gmf.model_filter.isHidden(), "four models here")
+
+def shown_with(key):
+    index = gmf.model_filter.findData(key)
+    gmf.model_filter.setCurrentIndex(index)
+    app.processEvents()
+    return sorted(path.name for path in gmf._visible)
+
+check("filtering to one model shows only its images",
+      shown_with("alpha.safetensors") == ["one.png", "two.png"],
+      str(shown_with("alpha.safetensors")))
+check("the other local model is separate",
+      shown_with("beta.safetensors") == ["three.png"])
+check("online images can be picked out",
+      shown_with("pollinations") == ["four.png"])
+check("and so can the ones with nothing recorded",
+      shown_with(UNRECORDED) == ["five.png"],
+      "which is the case the shared key broke")
+
+gmf._clear_filters()
+app.processEvents()
+check("clearing brings them all back", len(gmf._visible) == 5)
+check("and resets the picker", gmf.model_filter.currentData() == "")
+
+print("\n  it survives a new image arriving:")
+gmf.model_filter.setCurrentIndex(
+    gmf.model_filter.findData("alpha.safetensors"))
+app.processEvents()
+extra = mf / "out" / "six.png"
+write_png(extra, 48, 48, (200, 120, 60))
+os.utime(extra, (time.time(),) * 2)
+engmf.catalog.record(extra, "prompt 6", source="live",
+                     backend="comfyui", model="gamma.safetensors")
+gmf._rebuild_all()
+app.processEvents()
+check("the chosen filter is kept",
+      gmf.model_filter.currentData() == "alpha.safetensors",
+      "a filter that reset itself on every new picture would be maddening")
+check("and the new model joins the list",
+      gmf.model_filter.findData("gamma.safetensors") >= 0)
+
+engmf.shutdown()
+
 bad = [n for n, ok in results if not ok]
 
 

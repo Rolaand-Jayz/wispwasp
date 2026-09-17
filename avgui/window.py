@@ -11,8 +11,9 @@ import webbrowser
 from PySide6.QtCore import Qt, QSettings, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel,
+    QMainWindow, QPushButton, QSplitter, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from avcore.version import __version__
@@ -21,6 +22,8 @@ from . import theme
 from .assets import asset, load_pixmap
 from .bridge import EngineBridge
 from .customize_panel import CustomizePanel
+from .quick_settings import QuickSettings
+from .version_label import VersionLabel
 from .decorations import DecorationLayer
 from .gallery_panel import GalleryPanel
 from .overlays import ChangeBar, SubNavItem, Vignette
@@ -31,6 +34,15 @@ from .setup_panel import SetupPanel
 
 # Which nav entries each layout shows, and which panels sit on each page.
 # "split" puts live and prompt on one page, so it has one fewer entry.
+# Short names for the side bar picker. The long descriptions belong in
+# Settings, where there is room to read them; here they would not fit
+# and nobody browsing layouts needs the explanation twice.
+LAYOUT_CHOICES = [
+    ("hybrid", "Hybrid"),
+    ("sidebar", "Panels"),
+    ("split", "Split"),
+]
+
 LAYOUTS = {
     "hybrid": {
         "nav": [("live", "Live"), ("prompt", "Prompt"),
@@ -86,6 +98,7 @@ class MainWindow(QMainWindow):
         self.layout_name = None
         self._splitter_sizes = None
         self.set_layout(engine.s.get("ui.layout", "hybrid"), save=False)
+        self._wire_quick()
         self._restore_geometry()
 
         # Overlays live on the window, so they float above whatever is
@@ -300,6 +313,21 @@ class MainWindow(QMainWindow):
                     lambda: self.show_panel("customize"))
                 col.addWidget(self.customize_nav)
 
+        # The quick settings themselves now sit above the prompt boxes,
+        # where the eye already is when deciding what to make. Only the
+        # layout picker stays here: it is about the window rather than
+        # about the next image.
+        self.layout_label = QLabel("Layout")
+        self.layout_label.setObjectName("sectionLabel")
+        col.addWidget(self.layout_label)
+        self.layout_pick = QComboBox()
+        for key, name in LAYOUT_CHOICES:
+            self.layout_pick.addItem(name, key)
+        self.layout_pick.setMaximumWidth(140)
+        self.layout_pick.setToolTip("How the Live page is arranged")
+        self.layout_pick.currentIndexChanged.connect(self._quick_layout)
+        col.addWidget(self.layout_pick)
+
         col.addStretch(1)
 
         label = QLabel("Overlay for OBS")
@@ -326,9 +354,10 @@ class MainWindow(QMainWindow):
         # Quietest thing in the window, in the corner where a version
         # belongs. It matters when somebody reports a problem: "it does
         # this" is much easier to act on when the build is known.
-        self.version_label = QLabel(f"v{__version__}")
+        self.version_label = VersionLabel(f"v{__version__}")
         self.version_label.setObjectName("versionLabel")
-        self.version_label.setToolTip("The version of WispWasp you are running")
+        self.version_label.setToolTip(
+            "The version of WispWasp you are running")
         col.addWidget(self.version_label)
         return bar
 
@@ -453,6 +482,11 @@ class MainWindow(QMainWindow):
             # it with you rather than stranding it over another page.
             viewer.collapse()
 
+        # A model may have been installed, or the size changed in
+        # Settings, since these were last looked at.
+        if key in ("live", "prompt"):
+            self._sync_quick()
+
         if key == "gallery":
             # Re-read the folder on arrival. Images can appear while
             # another page is open, and a gallery that only updates when
@@ -510,6 +544,60 @@ class MainWindow(QMainWindow):
         for widget in self.findChildren(QWidget):
             widget.update()
         self.update()
+
+    def _wire_quick(self):
+        """
+        Connect every copy of the quick settings.
+
+        There is one per prompt box, and a change in either has to reach
+        the other and the Settings page - three views of the same
+        values, which must never disagree.
+        """
+        for panel in (getattr(self, "live", None),
+                      getattr(self, "prompt", None)):
+            quick = getattr(panel, "quick", None)
+            if quick is not None and not getattr(quick, "_wired", False):
+                quick._wired = True
+                quick.changed.connect(self._quick_changed)
+
+    def _quick_changed(self):
+        """
+        A quick change landed, so anything showing those values re-reads.
+
+        The Settings page keeps its own widgets, and a value changed
+        from the side bar would otherwise still read the old one there
+        until the app restarted.
+        """
+        settings = getattr(self, "settings", None)
+        adopt = getattr(settings, "_adopt_settings", None)
+        if adopt is not None and not settings.is_dirty():
+            adopt()
+        self._sync_quick()
+
+    def _quick_layout(self, _index):
+        wanted = self.layout_pick.currentData()
+        if not wanted or wanted == self.engine.s.get("ui.layout", "hybrid"):
+            return
+        self.engine.s.set("ui.layout", wanted)
+        self.engine.s.save()
+        self.set_layout(wanted)
+        self._sync_quick()
+
+    def _sync_quick(self):
+        """Re-read every copy of the quick settings."""
+        for panel in (getattr(self, "live", None),
+                      getattr(self, "prompt", None)):
+            quick = getattr(panel, "quick", None)
+            if quick is not None:
+                quick.refresh()
+        picker = getattr(self, "layout_pick", None)
+        if picker is not None:
+            current = self.engine.s.get("ui.layout", "hybrid")
+            index = picker.findData(current)
+            if index >= 0 and index != picker.currentIndex():
+                picker.blockSignals(True)
+                picker.setCurrentIndex(index)
+                picker.blockSignals(False)
 
     def _sync_sub_nav(self, key):
         """

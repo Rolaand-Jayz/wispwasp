@@ -155,6 +155,169 @@ check("splitter kept its proportions",
       sum(restored) > 100 and abs(restored[0] - settled[0]) < 20)
 
 eng.shutdown()
+print("\n=== quick settings above the prompt box ===")
+# Changing the model or the size is part of working, not part of
+# configuring, so the few settings people touch most sit beside the
+# picture. They write immediately - there is no Apply here, and none of
+# them needs one.
+from avcore.catalog import model_label
+from avgui.panels import _backend_and_model
+
+# One strip per prompt box now, rather than one in the side bar. The
+# earlier tests leave the window in whichever layout they finished with,
+# and Panels hides the Live prompt strip entirely - a widget inside a
+# hidden parent reports itself invisible however healthy it is.
+win.set_layout("hybrid")
+win.show_panel("live")
+pump(0.5)
+quick = win.live.quick
+check("they sit above the prompt box", quick.isVisible())
+check("the Prompt page has one of its own",
+      hasattr(win.prompt, "quick"),
+      "both pages behave the same way")
+check("and the layout picker stays in the side bar",
+      win.layout_pick.isVisible(),
+      "that one is about the window, not about the next image")
+
+print("\n  a change here lands immediately:")
+before = (s.get("image.width"), s.get("image.height"))
+for index in range(quick.size.count()):
+    if quick.size.itemData(index) != before:
+        quick.size.setCurrentIndex(index)
+        break
+pump(0.3)
+after = (s.get("image.width"), s.get("image.height"))
+check("the size is written straight away", after != before,
+      f"{before} -> {after}")
+
+quick.steps.setValue(11)
+pump(0.2)
+check("and so are the steps", s.get("comfyui.steps") == 11)
+
+print("\n  Pollinations hides what it cannot use:")
+quick.backend.setCurrentIndex(quick.backend.findData("pollinations"))
+pump(0.4)
+check("the backend is saved", s.get("image.backend") == "pollinations")
+check("the model picker goes", not quick.model.isVisible())
+check("steps go", not quick.steps.isVisible())
+check("guidance goes", not quick.cfg.isVisible())
+check("size stays, because it still applies", quick.size.isVisible())
+check("and it says why", "online" in quick.note.text().lower())
+
+quick.backend.setCurrentIndex(quick.backend.findData("comfyui"))
+pump(0.4)
+check("switching back brings them out", quick.model.isVisible())
+
+print("\n  the two strips agree with each other:")
+quick.steps.setValue(14)
+pump(0.4)
+check("a change on Live reaches the Prompt page",
+      win.prompt.quick.steps.value() == 14,
+      "three views of the same settings, which must never disagree")
+
+print("\n  the side bar and the settings page agree:")
+s.set("comfyui.steps", 33)
+s.save()
+quick.refresh()
+pump(0.2)
+check("a change made elsewhere shows here", quick.steps.value() == 33,
+      "the two read the same settings, so they cannot disagree")
+
+print("\n  an unusual size set in Settings is not overwritten:")
+s.set("image.width", 1152)
+s.set("image.height", 896)
+s.save()
+quick.refresh()
+pump(0.2)
+check("it is offered as it stands", quick.size.currentData() == (1152, 896),
+      str(quick.size.currentText()))
+check("and the settings are untouched",
+      s.get("image.width") == 1152 and s.get("image.height") == 896,
+      "opening a panel must not quietly change a setting")
+
+print("\n  the layout can be changed from here:")
+start = s.get("ui.layout")
+other = "split" if start != "split" else "hybrid"
+win.layout_pick.setCurrentIndex(win.layout_pick.findData(other))
+pump(0.8)
+check("the setting follows", s.get("ui.layout") == other,
+      f"{start} -> {s.get('ui.layout')}")
+# Which strip is on screen depends on the layout: Split gives the
+# prompt box to the Prompt panel, so the Live strip is correctly
+# hidden there. What matters is that the controls are still reachable
+# wherever the prompt box ended up.
+on_screen = [panel.quick for panel in (win.live, win.prompt)
+             if getattr(panel, "quick", None) is not None
+             and panel.quick.isVisible()]
+check("the controls are still with the prompt box", bool(on_screen),
+      f"{len(on_screen)} strip(s) visible in {win.engine.s.get('ui.layout')}"
+      if hasattr(win, "s") else f"{len(on_screen)} visible")
+check("and the picker shows where it is",
+      win.layout_pick.currentData() == other)
+
+print("\n=== what made each image ===")
+check("a local model is named by its file",
+      model_label("comfyui", "juggernautXL_ragnarok.safetensors")
+      == "ComfyUI - juggernautXL_ragnarok",
+      "the extension is noise")
+check("online needs no checkpoint",
+      model_label("pollinations", "") == "Pollinations")
+check("and an old image says so plainly",
+      model_label("", "") == "model not recorded",
+      "images made before this was recorded")
+
+s.set("image.backend", "comfyui")
+s.set("comfyui.checkpoint", "some_model.safetensors")
+check("the panels show what is generating",
+      _backend_and_model(s) == "some_model")
+s.set("comfyui.checkpoint", "")
+check("and say so when nothing is pinned",
+      _backend_and_model(s) == "first model found",
+      "beats showing nothing, and beats pretending to know")
+
+print("\n=== the hybrid strip offers the same choices as the Prompt page ===")
+# Typing into the strip used to be a lesser version of typing on the
+# Prompt page: no way to say whether the saved style applied, which one,
+# or whether the result went straight to the overlay.
+win.set_layout("hybrid")
+win.show_panel("live")
+pump(0.5)
+
+check("the saved style can be turned off here",
+      hasattr(win.live, "use_suffix"))
+check("the style itself can be chosen",
+      hasattr(win.live, "style_pick")
+      and win.live.style_pick.count() > 0,
+      f"{win.live.style_pick.count()} styles")
+check("and whether it lands on the overlay",
+      hasattr(win.live, "to_overlay"))
+
+print("\n  the two style pickers are one decision:")
+names = [win.live.style_pick.itemData(i)
+         for i in range(win.live.style_pick.count())]
+if len(names) > 1:
+    other = [n for n in names if n != win.live.style_pick.currentData()][0]
+    win.live.style_pick.setCurrentIndex(
+        win.live.style_pick.findData(other))
+    pump(0.6)
+    check("choosing on Live reaches the Prompt page",
+          win.prompt.style_pick.currentData() == other,
+          f"{other} on both")
+    check("and the setting agrees",
+          s.get("image.style_name") == other)
+
+print("\n  the overlay choice is remembered, not just ticked:")
+win.live.to_overlay.setChecked(False)
+pump(0.3)
+check("turning it off is written", s.get("image.manual_auto_push") is False)
+win.live.to_overlay.setChecked(True)
+pump(0.3)
+check("and turning it back on", s.get("image.manual_auto_push") is True)
+
+check("the tick says what the style adds",
+      "Adds:" in win.live.use_suffix.toolTip(),
+      win.live.use_suffix.toolTip())
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

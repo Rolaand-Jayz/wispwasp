@@ -983,6 +983,45 @@ convention - is still outstanding.
 
 ---
 
+## The controls beside the prompt box
+
+The few settings people change while working - backend, model, size,
+steps, guidance - sit in a compact strip directly above the prompt box
+on both the Live and Prompt pages, with the style and overlay choices on
+a second row. They write immediately: there is no Apply, and none of
+them needs one, because the next image simply uses the new value.
+
+They were in the side bar first. That was wrong for two reasons: a
+column of controls competed for width with everything else, worst of all
+in the split layout, and the decision belongs where the eye already is
+when deciding what to make. Only the layout picker stayed in the bar,
+because that one is about the window rather than about the next image.
+
+There are three views of the same settings - the Live strip, the Prompt
+strip and the Settings page - and changing any one updates the others.
+They read and write the same values, so they cannot disagree; what they
+need is only to be told to re-read.
+
+Adding the second row cost the transcript list a few pixels at small
+window heights, because Qt takes them from the list rather than the
+preview, which has a minimum. That is recorded honestly in the tests
+rather than papered over.
+
+## What made each image
+
+Every generated image records the backend and checkpoint that made it,
+captured at the moment of generation - the setting can change
+afterwards, and then nothing on disk would say where an older picture
+came from. It shows in the gallery caption, the hover text and the
+expanded viewer, and the gallery can be filtered by it.
+
+That filter is built from the pictures on hand rather than from what is
+installed: a model may have been deleted, or the images may have come
+from another machine, and the question is what made these. Images from
+before this was recorded get their own key rather than an empty one -
+sharing the empty string with "any model" made choosing them quietly do
+nothing.
+
 ## Settings profiles
 
 A profile keeps a named set of preferences - *Streaming*, *Quiet room* -

@@ -1,8 +1,8 @@
 {
-  "version": "0.1.4",
-  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.4/WispWasp-0.1.4-setup.exe",
+  "version": "0.1.5",
+  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.5/WispWasp-0.1.5-setup.exe",
   "page": "https://github.com/sucretown/wispwasp/releases/latest",
-  "sha256": "081fb79606247386a9d5b270c41677e8d299a14c4261beb63d88a36c4824123d",
-  "size": 82427498,
-  "notes": "Saved settings profiles, and a reset to defaults."
+  "sha256": "3879fdaa7799564944b7a6021187fb1051e622592a98cbf110a7f9ec554c10ce",
+  "size": 82524865,
+  "notes": "Quick settings above the prompt box, a layout picker, and the gallery now records and filters by the model that made each image."
 }

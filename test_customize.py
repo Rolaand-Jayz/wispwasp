@@ -1171,6 +1171,48 @@ for key, _label, _note in theme_names():
                 painter.end()
         check(f"{key}: {'enhanced' if rich else 'plain'} paints", ok)
 
+print("\n=== the version number does something if you poke it ===")
+# Twelve seconds of somebody shouting. Half a dozen overlapping copies
+# is unpleasant rather than funny, so a click while it is playing does
+# nothing at all - not queued, not restarted.
+from avgui.assets import asset
+from avgui.version_label import VersionLabel
+
+clip = asset("well_do_it_live.wav")
+check("the clip is in the assets folder", clip.exists(), str(clip.name))
+
+egg = VersionLabel("v0.0.0")
+check("it shows the version like any label", egg.text() == "v0.0.0")
+check("and invites a click", egg.cursor().shape() == Qt.PointingHandCursor)
+check("nothing is playing to begin with", not egg.is_playing())
+
+started = egg.play()
+check("clicking starts it", started)
+pump(0.5)
+check("it really is playing", egg.is_playing())
+
+check("clicking again while it plays does nothing", egg.play() is False,
+      "not queued, not restarted - the surprise is the joke")
+check("and it is still the first one playing", egg.is_playing())
+
+print("\n  it frees up once it has finished:")
+# Rather than sit through twelve seconds, the player is stopped, which
+# is the same state the clip ending leaves behind.
+egg._effect.stop()
+pump(0.3)
+check("nothing is playing now", not egg.is_playing())
+check("so it can be set off again", egg.play() is True)
+egg._effect.stop()
+
+print("\n  a missing clip costs a joke, not a crash:")
+quiet = VersionLabel("v0.0.0")
+quiet._failed = True
+check("it simply declines", quiet.play() is False)
+check("and asking again is still safe", quiet.play() is False)
+
+egg.deleteLater()
+quiet.deleteLater()
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

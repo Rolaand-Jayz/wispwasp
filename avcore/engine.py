@@ -867,8 +867,18 @@ class Engine:
         self._set(generated=self.state["generated"] + 1)
         # Recorded here rather than at the call sites, so live cycles,
         # manual prompts and batches are all covered by one line.
-        self.catalog.record(target, prompt, source=source,
-                            transcript=self.state.get("transcript", ""))
+        backend = self._backend
+        model = ""
+        try:
+            model = backend.checkpoint() or ""
+        except Exception:
+            # Never let a label stop an image being recorded.
+            model = ""
+        self.catalog.record(
+            target, prompt, source=source,
+            transcript=self.state.get("transcript", ""),
+            backend=self.s.get("image.backend", "comfyui") or "",
+            model=model)
         return target
 
     # ---- overlay -------------------------------------------------------

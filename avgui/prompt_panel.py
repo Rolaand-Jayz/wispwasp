@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from .quick_settings import QuickSettings
 from . import theme
 from .dialogs import ConfirmUnfavourite
 from .widgets import CollapsibleBox, ImagePreview
@@ -38,6 +39,11 @@ class PromptPanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 16, 18, 16)
         outer.setSpacing(10)
+
+        # Above the box here too, so the two pages behave the same way.
+        self.quick = QuickSettings(self.engine.s, self.engine,
+                                   compact=True)
+        outer.addWidget(self.quick)
 
         self.box = QPlainTextEdit()
         self.box.setPlaceholderText(

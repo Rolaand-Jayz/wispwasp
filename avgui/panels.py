@@ -7,6 +7,7 @@ different layout without losing anything.
 from PySide6.QtCore import Qt, QRectF, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox, QComboBox,
     QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QPushButton, QSpinBox, QSplitter, QStyle,
     QStyledItemDelegate, QVBoxLayout, QWidget,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .dialogs import ConfirmUnfavourite
+from .quick_settings import QuickSettings
 from .widgets import ImagePreview, LevelMeter, TallyLight
 
 WORKING_MODES = ("recording", "transcribing", "generating", "loading")
@@ -102,6 +104,23 @@ class KindBarDelegate(QStyledItemDelegate):
         return size
 
 
+def _backend_and_model(settings):
+    """A short name for whatever is set to generate right now."""
+    from avcore.catalog import model_label
+
+    backend = (settings.get("image.backend", "comfyui") or "comfyui")
+    if backend != "comfyui":
+        return model_label(backend, "")
+
+    chosen = (settings.get("comfyui.checkpoint") or "").strip()
+    if chosen:
+        return model_label(backend, chosen, short=True)
+
+    # Nothing pinned: whichever ComfyUI picks first. Saying so beats
+    # showing nothing, and beats pretending to know which one.
+    return "first model found"
+
+
 def _listen_summary(s):
     """
     Account for every listen that did not become an image.
@@ -153,6 +172,9 @@ class LivePanel(QWidget):
         super().__init__(parent)
         self.engine = engine
         self._history_key = None
+        self._style_names = None
+        self._style_current = None
+        self._filling_styles = False
         self._build()
 
     def _build(self):
@@ -245,8 +267,13 @@ class LivePanel(QWidget):
         self.split.setChildrenCollapsible(False)
         self.split.addWidget(self.preview)
         self.split.addWidget(self.heard)
-        self.split.setStretchFactor(0, 4)
-        self.split.setStretchFactor(1, 1)
+        # The preview still takes most of the height, but the strip
+        # above the prompt box grew by a row when the style and overlay
+        # choices moved in, and the transcript list paid for it - it
+        # came out below the two entries it is meant to show. A slightly
+        # smaller share for the preview puts that back.
+        self.split.setStretchFactor(0, 7)
+        self.split.setStretchFactor(1, 2)
         self.split.splitterMoved.connect(self._remember_split)
         body.addWidget(self.split, 1)
 
@@ -263,8 +290,51 @@ class LivePanel(QWidget):
         # The point of the hybrid layout: always visible, never a detour.
         strip = QWidget()
         strip.setObjectName("promptStrip")
-        srow = QHBoxLayout(strip)
-        srow.setContentsMargins(14, 10, 14, 10)
+        stack = QVBoxLayout(strip)
+        stack.setContentsMargins(14, 8, 14, 10)
+        stack.setSpacing(6)
+
+        # Directly above the prompt box, which is where the eye already
+        # is when deciding what to make. In the side bar these competed
+        # for width with everything else, worst of all in the split
+        # layout.
+        self.quick = QuickSettings(self.engine.s, self.engine,
+                                   compact=True)
+        stack.addWidget(self.quick)
+
+        # The same three decisions the Prompt page offers. Typing here
+        # was otherwise a lesser version of typing there: no way to say
+        # whether the saved style applies, which one, or whether the
+        # result should go straight to the overlay.
+        choices = QHBoxLayout()
+        choices.setContentsMargins(0, 0, 0, 0)
+        choices.setSpacing(12)
+
+        self.use_suffix = QCheckBox("Apply the saved style")
+        self.use_suffix.setChecked(True)
+        choices.addWidget(self.use_suffix)
+
+        # Beside the tick that decides whether a style applies, because
+        # "whether" and "which" are one decision.
+        self.style_pick = QComboBox()
+        self.style_pick.setMinimumWidth(140)
+        self.style_pick.setMaximumWidth(200)
+        self.style_pick.setToolTip(
+            "Which style is added to every prompt")
+        self.style_pick.currentIndexChanged.connect(self._pick_style)
+        choices.addWidget(self.style_pick)
+
+        self.to_overlay = QCheckBox("Show on overlay")
+        self.to_overlay.setChecked(
+            bool(self.engine.s.get("image.manual_auto_push", True)))
+        self.to_overlay.toggled.connect(
+            lambda on: self._save_auto_push(on))
+        choices.addWidget(self.to_overlay)
+        choices.addStretch(1)
+        stack.addLayout(choices)
+
+        srow = QHBoxLayout()
+        srow.setContentsMargins(0, 0, 0, 0)
         srow.setSpacing(8)
 
         self.prompt_box = QLineEdit()
@@ -289,6 +359,7 @@ class LivePanel(QWidget):
         srow.addWidget(self.amount)
         srow.addWidget(self.make_btn)
         srow.addWidget(self.push_btn)
+        stack.addLayout(srow)
         self.strip = strip
         outer.addWidget(strip)
 
@@ -309,8 +380,78 @@ class LivePanel(QWidget):
         text = self.prompt_box.text().strip()
         if not text:
             return
-        if self.engine.queue_manual(text, amount=self.amount.value()):
+
+        # Built the same way the Prompt page builds it, so the same
+        # typing gives the same picture wherever it was typed.
+        base = text
+        suffix = ""
+        if self.use_suffix.isChecked():
+            suffix = self.engine.s.get("image.style_suffix", "") or ""
+            if suffix:
+                text = f"{base}, {suffix}"
+
+        if self.engine.queue_manual(
+                text,
+                amount=self.amount.value(),
+                auto_push=self.to_overlay.isChecked(),
+                base=base,
+                suffix=suffix):
             self.prompt_box.clear()
+
+    def _save_auto_push(self, on):
+        """Remember the overlay choice, as the Prompt page does."""
+        self.engine.s.set("image.manual_auto_push", bool(on))
+        self.engine.s.save()
+
+    def _pick_style(self, _index):
+        """
+        Choose which saved style is applied.
+
+        The engine holds the choice and tells every other panel, so this
+        picker and the one on the Prompt page are two views of one
+        decision rather than two decisions.
+        """
+        if getattr(self, "_filling_styles", False):
+            return
+        name = self.style_pick.currentData()
+        if name:
+            self.engine.set_style(name)
+
+    def _render_styles(self, styles, current):
+        """
+        Redraw the picker from the shared list.
+
+        Rebuilt only when something differs: this runs on every state
+        update, and refilling a combo would close it under the hand of
+        anyone reading it.
+        """
+        # A style is a preset - a name and the text it adds - not just a
+        # name. Compared on both, because editing a style changes what
+        # every prompt gets without its name moving, and comparing names
+        # alone would leave this showing the old suffix.
+        key = [(preset["name"], preset["suffix"]) for preset in styles]
+        if key == getattr(self, "_style_names", None) \
+                and current == getattr(self, "_style_current", None):
+            return
+        self._style_names = list(key)
+        self._style_current = current
+
+        self._filling_styles = True
+        try:
+            self.style_pick.clear()
+            for preset in styles:
+                self.style_pick.addItem(preset["name"], preset["name"])
+                self.style_pick.setItemData(
+                    self.style_pick.count() - 1,
+                    preset["suffix"] or "Nothing is added.",
+                    Qt.ToolTipRole)
+            index = self.style_pick.findData(current)
+            self.style_pick.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self._filling_styles = False
+
+        suffix = self.engine.s.get("image.style_suffix", "") or ""
+        self.use_suffix.setToolTip(f"Adds: {suffix or '(none)'}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -339,6 +480,13 @@ class LivePanel(QWidget):
         # for it; "Listen" and "Stop" are unambiguous next to the tally.
         listening = self.listen_btn.text().startswith("Stop")
         self._set_listen_text(listening)
+
+    def _model_label(self):
+        engine = getattr(self, "engine", None)
+        settings = getattr(engine, "s", None)
+        if settings is None:
+            return ""
+        return _backend_and_model(settings)
 
     def _set_listen_text(self, listening):
         if getattr(self, "_listening_wide", True):
@@ -488,6 +636,17 @@ class LivePanel(QWidget):
         bits = []
         if s.get("queued"):
             bits.append(f"{s['queued']} queued")
+        # What is actually making the pictures. It is in the side bar
+        # too, but this is the line people watch while working, and
+        # "why does this look different" is usually answered by the
+        # model having changed.
+        making = self._model_label()
+        if making:
+            bits.append(making)
+
+        self._render_styles(s.get("styles") or [],
+                            s.get("style_name") or "")
+
         listens = s.get("cycles") or 0
         made = s.get("generated") or 0
         if listens:

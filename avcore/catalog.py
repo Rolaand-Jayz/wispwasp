@@ -20,6 +20,51 @@ from pathlib import Path
 MAX_ENTRIES = 2000
 
 
+# Images from before the model was recorded need a key that is not the
+# empty string, because empty already means "any model" to the filter.
+# Sharing one value made choosing "Not recorded" quietly do nothing.
+UNRECORDED = "\x00unrecorded"
+
+
+def model_key(backend, model):
+    """
+    One value identifying what made an image, for matching and filtering.
+
+    A local model is its filename; online work has no checkpoint, so the
+    backend name stands in. Images from before this was recorded get an
+    empty key, which is a real answer rather than a missing one.
+    """
+    backend = (backend or "").strip().lower()
+    model = (model or "").strip()
+    if model:
+        return model
+    if backend and backend != "comfyui":
+        return backend
+    return UNRECORDED
+
+
+def model_label(backend, model, short=False):
+    """
+    A readable name for whatever made an image.
+
+    Pollinations has no checkpoint to name, so saying "Pollinations" is
+    the whole truth there. A local model is named by its file, with the
+    extension dropped - nobody thinks of their model as ending in
+    .safetensors.
+    """
+    backend = (backend or "").strip().lower()
+    model = (model or "").strip()
+
+    if backend and backend != "comfyui":
+        return backend.capitalize()
+
+    if not model:
+        return "" if short else "model not recorded"
+
+    stem = model.rsplit(".", 1)[0] if "." in model else model
+    return stem if short else f"ComfyUI - {stem}"
+
+
 class Catalog:
     def __init__(self, path):
         self.path = Path(path)
@@ -47,7 +92,8 @@ class Catalog:
         except OSError:
             pass
 
-    def record(self, paths, prompt, source="live", transcript=""):
+    def record(self, paths, prompt, source="live", transcript="",
+               backend="", model=""):
         """
         Note the prompt behind one image.
 
@@ -65,6 +111,11 @@ class Catalog:
             "source": source,
             "transcript": transcript or "",
             "at": time.time(),
+            # What made it. Recorded at the moment of generation because
+            # the setting can change afterwards, and then nothing on
+            # disk would say what any older picture came from.
+            "backend": backend or "",
+            "model": model or "",
         }
         with self._lock:
             for p in paths:
@@ -145,6 +196,29 @@ class Catalog:
     def is_censored(self, path):
         entry = self.lookup(path)
         return bool(entry and entry.get("censored"))
+
+    def models_used(self):
+        """
+        Every model that appears in the history, newest use first.
+
+        Taken from the images themselves rather than from what is
+        installed: someone may have deleted a model, or be looking at
+        pictures made on another machine, and the question here is
+        "what made these", not "what could I run now".
+        """
+        seen = {}
+        with self._lock:
+            for entry in self._data.values():
+                if not entry.get("prompt"):
+                    continue
+                key = model_key(entry.get("backend"), entry.get("model"))
+                label = model_label(entry.get("backend"),
+                                    entry.get("model"), short=True)
+                at = entry.get("at") or 0
+                if key not in seen or at > seen[key][1]:
+                    seen[key] = (label or "Not recorded", at)
+        return [(key, label) for key, (label, _at)
+                in sorted(seen.items(), key=lambda kv: -kv[1][1])]
 
     def censored(self):
         """Every censored filename."""

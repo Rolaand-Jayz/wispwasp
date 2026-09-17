@@ -96,12 +96,16 @@ class Filters:
         # Same three states as favourites, for the same reason: censored
         # is a mark on an image, not a kind of one.
         self.censored = "any"
+        # Which model made the image. Empty means any; otherwise it is
+        # a key from the catalogue's own history.
+        self.model = ""
 
     def active(self):
         return bool(self.date or self.name or self.prompt
                     or self.source != "any" or self.kind != "any"
                     or self.favourites != "any"
-                    or self.censored != "any")
+                    or self.censored != "any"
+                    or bool(self.model))
 
     def clear(self):
         self.__init__()
@@ -126,6 +130,15 @@ class Filters:
             return False
         if self.censored == "hide" and censored:
             return False
+
+        if self.model:
+            from avcore.catalog import model_key
+
+            made_by = model_key((entry or {}).get("backend"),
+                                (entry or {}).get("model"))
+            if made_by != self.model:
+                return False
+
 
         if self.source in ("heard", "typed"):
             if not entry or entry.get("source") != (
