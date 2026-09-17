@@ -55,6 +55,15 @@ def model_label(backend, model, short=False):
     backend = (backend or "").strip().lower()
     model = (model or "").strip()
 
+    if backend == "svd":
+        # Named properly rather than capitalised: "Svd" reads like a
+        # typo, and the checkpoint is what someone would recognise.
+        stem = model.rsplit(".", 1)[0] if "." in model else model
+        if short:
+            return stem or "Stable Video Diffusion"
+        return (f"Stable Video Diffusion - {stem}" if stem
+                else "Stable Video Diffusion")
+
     if backend and backend != "comfyui":
         return backend.capitalize()
 
@@ -93,7 +102,7 @@ class Catalog:
             pass
 
     def record(self, paths, prompt, source="live", transcript="",
-               backend="", model=""):
+               backend="", model="", seconds=None):
         """
         Note the prompt behind one image.
 
@@ -117,6 +126,11 @@ class Catalog:
             "backend": backend or "",
             "model": model or "",
         }
+        if seconds:
+            # Only clips have a length. Written down now because reading
+            # it back would mean decoding video, and the packaged build
+            # has nothing to decode with.
+            entry["seconds"] = float(seconds)
         with self._lock:
             for p in paths:
                 if not p:

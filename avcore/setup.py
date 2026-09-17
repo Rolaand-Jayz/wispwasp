@@ -63,6 +63,42 @@ TIERS = {
 
 DEFAULT_TIER = "sdxl"
 
+# Animating a still is an extra rather than part of the app. It is
+# another 8.9GB, it needs a card that can hold it, and plenty of people
+# will never want it - so nothing is fetched and the menu entry stays
+# hidden until somebody asks for it.
+VIDEO_MODEL = {
+    "label": "Animate images (video)",
+    "note": "About 8.9 GB. Turns a gallery picture into a short clip. "
+            "Needs an NVIDIA card with 12 GB or more.",
+    "name": "svd_xt.safetensors",
+    "url": ("https://huggingface.co/stabilityai"
+            "/stable-video-diffusion-img2vid-xt/resolve/main"
+            "/svd_xt.safetensors"),
+    "bytes": 9_556_534_000,
+    "min_bytes": 8_000_000_000,
+}
+
+
+def video_file(settings=None, root=None):
+    """Where the video model would live."""
+    return checkpoints_dir(settings, root) / VIDEO_MODEL["name"]
+
+
+def video_installed(settings=None, root=None):
+    """
+    Is the video model there and whole?
+
+    Size-checked like the others: a part-finished 8.9GB download under
+    the right name would otherwise look installed and then fail in the
+    middle of a job.
+    """
+    path = video_file(settings, root)
+    try:
+        return path.exists() and path.stat().st_size >= VIDEO_MODEL["min_bytes"]
+    except OSError:
+        return False
+
 
 def tier(settings=None):
     """Which model setup should fetch."""

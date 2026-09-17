@@ -74,6 +74,18 @@ def run(log_path):
     except Exception as exc:
         record("bundled assets are present", False, str(exc))
 
+    # --- video, which is optional but should work if claimed ----------
+    # PyAV is deliberately excluded and stubbed, and nothing in the app
+    # decodes video: posters are written by ComfyUI when the clip is
+    # made, and a clip's length is recorded in the catalogue.
+
+    try:
+        from PySide6.QtMultimediaWidgets import QVideoWidget  # noqa: F401
+
+        record("video playback is bundled", True)
+    except Exception as exc:
+        record("video playback is bundled", False, str(exc))
+
     # --- overlay page ---------------------------------------------------
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     record("overlay.html is bundled", (base / "overlay.html").exists(),

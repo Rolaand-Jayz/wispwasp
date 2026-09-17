@@ -118,7 +118,12 @@ class Filters:
         made before the catalogue existed - those simply have no prompt to
         match against.
         """
-        if self.kind != "any" and path.suffix.lower() != self.kind:
+        if self.kind == "video":
+            # One entry covering every clip format, because nobody
+            # filters by container.
+            if path.suffix.lower() not in (".webm", ".mp4"):
+                return False
+        elif self.kind != "any" and path.suffix.lower() != self.kind:
             return False
 
         if self.favourites == "only" and not favourite:

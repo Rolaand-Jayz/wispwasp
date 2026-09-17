@@ -5,6 +5,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox, QFormLayout,
     QDialog, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QVBoxLayout,
 )
@@ -652,3 +653,105 @@ class ConfirmProfileDelete(QDialog):
         outer.addLayout(row)
         deny.setDefault(True)
         deny.setFocus()
+
+
+class ConfirmAnimate(QDialog):
+    """
+    Asks what sort of clip to make, and what it will cost.
+
+    The lengths and their sizes come from what this card actually
+    managed, not from what sounds reasonable: a longer clip only fits if
+    each frame is smaller, and asking for ten seconds at full size takes
+    ComfyUI down rather than merely running slowly.
+    """
+
+    def __init__(self, name, shape="landscape", parent=None):
+        super().__init__(parent)
+        from avcore.video import LENGTHS, SHAPE_NAMES, plan
+
+        self._plan = plan
+        self.setWindowTitle("Animate image")
+        self.setModal(True)
+        self.setMinimumWidth(480)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 16)
+        outer.setSpacing(10)
+
+        title = QLabel(f"Make a clip from {name}")
+        title.setObjectName("dialogTitle")
+        outer.addWidget(title)
+
+        rows = QFormLayout()
+        rows.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        rows.setHorizontalSpacing(12)
+        rows.setVerticalSpacing(8)
+
+        self.length = QComboBox()
+        for frames, _seconds, label, _estimate in LENGTHS:
+            self.length.addItem(label, frames)
+        self.length.currentIndexChanged.connect(self._retell)
+        rows.addRow("Length", self.length)
+
+        self.shape = QComboBox()
+        for key, label in SHAPE_NAMES:
+            self.shape.addItem(label, key)
+        index = self.shape.findData(shape)
+        self.shape.setCurrentIndex(index if index >= 0 else 0)
+        self.shape.currentIndexChanged.connect(self._retell)
+        # Defaulted from the picture, but not forced: cropping a
+        # landscape photo to a portrait clip is a legitimate thing to
+        # want.
+        self.shape.setToolTip(
+            "The picture is cropped to this shape. Chosen to match it, "
+            "but you can pick another.")
+        rows.addRow("Shape", self.shape)
+        outer.addLayout(rows)
+
+        self.detail = QLabel("")
+        self.detail.setObjectName("fieldLabel")
+        self.detail.setWordWrap(True)
+        outer.addWidget(self.detail)
+
+        note = QLabel(
+            "Longer clips are made smaller so they fit in memory - every "
+            "option takes about the same time.\n\n"
+            "There is no sound: nothing that generates audio fits this "
+            "graphics card. A prompt cannot steer it either - this model "
+            "takes the picture and nothing else.\n\n"
+            "ComfyUI does one job at a time, so anything the live page "
+            "hears while this runs is queued and generated afterwards.")
+        note.setWordWrap(True)
+        note.setObjectName("fieldLabel")
+        outer.addWidget(note)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        deny = QPushButton("Not now")
+        deny.setObjectName("denyButton")
+        deny.clicked.connect(self.reject)
+        row.addWidget(deny)
+        self.go = QPushButton("Make the clip")
+        self.go.setObjectName("confirmButton")
+        self.go.clicked.connect(self.accept)
+        row.addWidget(self.go)
+        outer.addLayout(row)
+        deny.setDefault(True)
+        deny.setFocus()
+        self._retell()
+
+    def _retell(self):
+        """Say what the current choice will produce, and how long it takes."""
+        frames = self.length.currentData() or 25
+        shape = self.shape.currentData() or "landscape"
+        width, height, seconds, estimate = self._plan(frames, shape)
+        minutes, rest = divmod(int(estimate), 60)
+        self.detail.setText(
+            f"{seconds:g} seconds of video at {width} x {height}, "
+            f"about {minutes} minute{'s' if minutes != 1 else ''} "
+            f"{rest} seconds to make.")
+
+    def choice(self):
+        """The frames and shape chosen."""
+        return (self.length.currentData() or 25,
+                self.shape.currentData() or "landscape")

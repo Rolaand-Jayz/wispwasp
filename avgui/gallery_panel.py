@@ -6,11 +6,15 @@ overlay. Thumbnails are cached by path so scrolling doesn't re-decode.
 import os
 import subprocess
 from datetime import datetime
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import (
+    QPoint, QRect, QSize, Qt, QThread, QTimer, Signal,
+)
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QProgressBar,
     QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
@@ -23,7 +27,10 @@ from .filters import DATE_RANGES, SOURCES, Filters
 from .viewer import ImageViewer
 from .widgets import HoverCaption, TriStateFilter
 
-EXTS = (".png", ".jpg", ".jpeg", ".webp")
+# Clips sit in the same folder as the pictures they were made from, so
+# the gallery is one place rather than two.
+VIDEO_EXTS = (".webm", ".mp4")
+EXTS = (".png", ".jpg", ".jpeg", ".webp") + VIDEO_EXTS
 COLS = 3
 THUMB = QSize(210, 118)
 
@@ -33,14 +40,40 @@ THUMB = QSize(210, 118)
 PAGE_SIZES = [("12", 12), ("24", 24), ("48", 48), ("96", 96), ("All", 0)]
 
 
+class AnimateWorker(QThread):
+    """
+    Makes a clip, off the interface thread.
+
+    Two minutes of work. Anything blocking here would freeze the window
+    for that whole time, which is the fault this project has tripped
+    over more than once.
+    """
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, engine, source, parent=None):
+        super().__init__(parent)
+        self.engine = engine
+        self.source = source
+
+    def run(self):
+        try:
+            self.done.emit(self.engine.animate_image(self.source))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class Thumb(QWidget):
     def __init__(self, path, on_push, entry=None, on_changed=None,
-                 engine=None, on_expand=None, parent=None):
+                 engine=None, on_expand=None, on_animate=None,
+                 parent=None):
         super().__init__(parent)
         self.path = Path(path)
         self.engine = engine
         self.on_changed = on_changed or (lambda: None)
         self.on_expand = on_expand
+        self.on_animate = on_animate
         self.entry = entry or {}
         self.censored = bool(self.entry.get("censored"))
         col = QVBoxLayout(self)
@@ -48,7 +81,8 @@ class Thumb(QWidget):
         col.setSpacing(4)
 
         self.image = HoverCaption(THUMB)
-        pm = QPixmap(str(self.path))
+        self.is_video = self.path.suffix.lower() in VIDEO_EXTS
+        pm = self._thumbnail()
         self.full = pm
         if not pm.isNull():
             shown = pm.scaled(THUMB, Qt.KeepAspectRatio,
@@ -70,6 +104,14 @@ class Thumb(QWidget):
             detail = "   ".join(x for x in (
                 "typed" if source == "manual" else "heard", stamp,
                 made_by) if x)
+            if self.is_video:
+                from avcore.video import clip_length
+
+                seconds = clip_length(self.path, self.entry)
+                detail = "   ".join(
+                    x for x in ("video",
+                                f"{seconds:.1f}s" if seconds else "",
+                                stamp, made_by) if x)
             self.image.set_caption(entry["prompt"], detail)
             # The full name in the tooltip: a checkpoint name is often
             # too long for the caption but is exactly what someone wants
@@ -132,6 +174,20 @@ class Thumb(QWidget):
 
         menu.addAction("Rename photo", self._rename)
 
+        # Only when the model is actually there. Offering it otherwise
+        # would mean a menu entry whose only outcome is an apology, and
+        # the whole point of the opt-in is that people who do not want
+        # video never see it.
+        from avcore.setup import video_installed
+
+        if not self.is_video and self.engine is not None \
+                and video_installed(self.engine.s):
+            menu.addSeparator()
+            animate = menu.addAction("Animate this...")
+            animate.setToolTip(
+                "Make a short clip from this picture")
+            animate.triggered.connect(self._animate)
+
         menu.addSeparator()
         delete = menu.addAction("Delete photo")
         # Styled directly rather than through the stylesheet: Qt does not
@@ -159,6 +215,12 @@ class Thumb(QWidget):
         p.end()
         return QIcon(pm)
 
+    def _animate(self):
+        """Ask the gallery to turn this picture into a clip."""
+        asked = getattr(self, "on_animate", None)
+        if asked is not None:
+            asked(self.path)
+
     def _copy_prompt(self):
         prompt = (self.entry or {}).get("prompt") or ""
         if prompt:
@@ -168,6 +230,31 @@ class Thumb(QWidget):
         """Ask the gallery to open this image, starting from here."""
         if callable(self.on_expand):
             self.on_expand(self.path, self.image)
+
+    def _thumbnail(self):
+        """
+        Something to show in the grid.
+
+        A clip cannot be drawn by a label, so its first frame stands in.
+        Decoded once and kept beside the clip, because decoding on every
+        rebuild of the gallery would make scrolling crawl.
+        """
+        if not self.is_video:
+            return QPixmap(str(self.path))
+
+        from avcore.video import poster_path
+
+        # Written beside the clip when it was made, with a leading
+        # underscore so the gallery's own scan skips it. Nothing is
+        # decoded here: the packaged build has no PyAV, and a thumbnail
+        # that only appears when run from source would be a trap.
+        still = poster_path(self.path)
+        if still.exists():
+            return QPixmap(str(still))
+        # A clip from before posters were saved, or one whose still went
+        # missing. A blank tile still carries the name and the menu,
+        # which beats the item vanishing.
+        return QPixmap()
 
     def _blurred(self, pixmap):
         """
@@ -263,7 +350,29 @@ class GalleryPanel(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(14, 0, 12, 0)
         self.count = QLabel("No images yet")
+
+        # Shown only while a clip is being made. At the top because it
+        # is the answer to "what is it doing?", and that question is
+        # asked of the whole window rather than of one thumbnail.
+        self.clip_bar = QProgressBar()
+        self.clip_bar.setTextVisible(True)
+        self.clip_bar.hide()
+        self.clip_stop = QPushButton("Stop")
+        self.clip_stop.setObjectName("denyButton")
+        self.clip_stop.clicked.connect(self._cancel_clip)
+        self.clip_stop.hide()
+
+        self._clip_timer = QTimer(self)
+        self._clip_timer.setInterval(1000)
+        self._clip_timer.timeout.connect(self._tick_clip)
+        self._clip_started = 0.0
+        self._clip_estimate = 1
+        self._clip_name = ""
         row.addWidget(self.count)
+        # Between the count and the buttons: it only appears while a
+        # clip is being made, and takes the space nothing else wants.
+        row.addWidget(self.clip_bar, 1)
+        row.addWidget(self.clip_stop)
         row.addStretch(1)
 
         folder_btn = QPushButton("Open folder")
@@ -452,7 +561,8 @@ class GalleryPanel(QWidget):
             entry = catalog.lookup(path) if catalog is not None else None
             self.grid.addWidget(
                 Thumb(path, self._push, entry, on_changed=self._rebuild_all,
-                      engine=self.engine, on_expand=self._open_viewer),
+                      engine=self.engine, on_expand=self._open_viewer,
+                     on_animate=self._animate),
                 i // cols, i % cols)
 
         total = len(self._visible)
@@ -573,7 +683,13 @@ class GalleryPanel(QWidget):
 
         self.kind_pick = QComboBox()
         self.kind_pick.addItem("Any type", "any")
+        # "Video" rather than WEBM: the format is an implementation
+        # detail, and someone looking for their clips is not thinking
+        # about containers.
+        self.kind_pick.addItem("Video", "video")
         for ext in (".png", ".jpg", ".jpeg", ".webp"):
+            if ext in VIDEO_EXTS:
+                continue      # covered by the Video entry above
             self.kind_pick.addItem(ext.lstrip(".").upper(), ext)
         self.kind_pick.currentIndexChanged.connect(self._read_filters)
         row.addWidget(self.kind_pick)
@@ -690,6 +806,116 @@ class GalleryPanel(QWidget):
         window = self.window()
         return QRect(self.mapTo(window, QPoint(0, 0)), self.size())
 
+    def _say(self, message):
+        """
+        A passing note, shown where the image count lives.
+
+        Put back by the next rebuild, which is the right lifetime for
+        "your clip is being made" - it stops mattering the moment the
+        gallery refreshes with the clip in it.
+        """
+        label = getattr(self, "count", None)
+        if label is not None:
+            label.setText(message)
+
+    def _animate(self, source):
+        """
+        Turn a picture into a clip, having asked first.
+
+        Asked because it is two minutes of the graphics card and a file
+        that takes up space - not the sort of thing to start from a
+        stray menu click.
+        """
+        from .dialogs import ConfirmAnimate
+
+        if getattr(self, "_animator", None) is not None \
+                and self._animator.isRunning():
+            self._say(
+                "One clip is already being made. They take a couple of "
+                "minutes and only one runs at a time.")
+            return
+
+        from avcore.video import plan, shape_for
+
+        picture = QPixmap(str(source))
+        shape = shape_for(picture.width(), picture.height())
+
+        dialog = ConfirmAnimate(Path(source).name, shape, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        frames, shape = dialog.choice()
+        _w, _h, _seconds, estimate = plan(frames, shape)
+        self.engine.s.set("video.frames", frames)
+        self.engine.s.set("video.shape", shape)
+        self.engine.s.save()
+
+        self._start_clip_progress(Path(source).name, estimate)
+        self._animator = AnimateWorker(self.engine, source, self)
+        self._animator.done.connect(self._clip_done)
+        self._animator.failed.connect(self._clip_failed)
+        self._animator.start()
+
+    def _start_clip_progress(self, name, estimate):
+        """
+        A bar at the top, counting down.
+
+        Three minutes with nothing moving is indistinguishable from a
+        hang. There is no per-step progress to be had over ComfyUI's
+        HTTP interface, so this counts against the measured estimate and
+        says so - an honest guess beats a bar that pretends to know.
+        """
+        self.clip_bar.setRange(0, max(1, int(estimate)))
+        self.clip_bar.setValue(0)
+        self.clip_bar.show()
+        self.clip_stop.show()
+        self._clip_name = name
+        self._clip_started = time.time()
+        self._clip_estimate = max(1, int(estimate))
+        self._clip_timer.start()
+        self._tick_clip()
+
+    def _tick_clip(self):
+        elapsed = int(time.time() - self._clip_started)
+        left = self._clip_estimate - elapsed
+        self.clip_bar.setValue(min(elapsed, self._clip_estimate))
+        if left > 0:
+            minutes, rest = divmod(left, 60)
+            when = (f"{minutes}m {rest:02d}s" if minutes
+                    else f"{rest} seconds")
+            self.clip_bar.setFormat(
+                f"Animating {self._clip_name} - about {when} left")
+        else:
+            # Past the estimate. Saying "any moment now" is friendlier
+            # than a full bar that sits there, and truer than a
+            # percentage that cannot go past 100.
+            self.clip_bar.setFormat(
+                f"Animating {self._clip_name} - any moment now")
+
+    def _stop_clip_progress(self):
+        self._clip_timer.stop()
+        self.clip_bar.hide()
+        self.clip_stop.hide()
+
+    def _cancel_clip(self):
+        self._say("Stopping the clip...")
+        cancel = getattr(self.engine, "cancel_video", None)
+        if cancel is not None:
+            cancel()
+
+    def _clip_done(self, clip):
+        self._stop_clip_progress()
+        if clip is None:
+            self._say("The clip was stopped.")
+            return
+        self._say(
+            f"{Path(clip).name} is ready. Filter by Video to find it.")
+        self._rebuild_all()
+
+    def _clip_failed(self, message):
+        self._stop_clip_progress()
+        self._say(message)
+
     def _open_viewer(self, path, thumb_widget):
         """
         Expand an image, growing out of the thumbnail that asked.
@@ -735,11 +961,69 @@ class GalleryPanel(QWidget):
                         f"{entry['prompt']}   -   {made_by}"
                         if made_by else entry["prompt"])
 
+        # A clip cannot be shown by the image viewer, so it gets the
+        # player instead. Same place on screen, same way out.
+        if Path(path).suffix.lower() in VIDEO_EXTS:
+            self._open_clip(path)
+            return
+
         self.viewer.setGeometry(self._viewer_bounds())
         self.viewer.open_at(shown, index, home, censored, captions)
         # Above the decoration, and above everything else the window
         # stacks over its panels.
         self.viewer.raise_()
+
+    def _open_clip(self, path):
+        """
+        Play a clip over the gallery.
+
+        Built on demand: most people never make one, and Qt Multimedia
+        is heavy enough that loading it for everybody would be rude.
+        """
+        from .video_player import VideoPlayer
+
+        if getattr(self, "clip_view", None) is None:
+            holder = QWidget(self.window())
+            holder.setObjectName("viewer")
+            holder.setAttribute(Qt.WA_StyledBackground, True)
+            column = QVBoxLayout(holder)
+            column.setContentsMargins(24, 20, 24, 20)
+            column.setSpacing(10)
+
+            self.clip_player = VideoPlayer()
+            column.addWidget(self.clip_player, 1)
+
+            row = QHBoxLayout()
+            self.clip_name = QLabel("")
+            self.clip_name.setObjectName("fieldLabel")
+            row.addWidget(self.clip_name, 1)
+            close = QPushButton("Close")
+            close.clicked.connect(self._close_clip)
+            row.addWidget(close)
+            column.addLayout(row)
+
+            self.clip_view = holder
+
+        self.clip_name.setText(Path(path).name)
+        self.clip_view.setGeometry(self._viewer_bounds())
+        self.clip_view.show()
+        self.clip_view.raise_()
+        self.clip_player.play_file(path)
+
+    def _close_clip(self):
+        """
+        Put the player away, and let go of the file.
+
+        Stopping matters beyond tidiness: Windows holds a lock on a file
+        being played, and deleting the clip afterwards would fail with a
+        permission error that reads like a bug.
+        """
+        player = getattr(self, "clip_player", None)
+        if player is not None:
+            player.stop()
+        view = getattr(self, "clip_view", None)
+        if view is not None:
+            view.hide()
 
     def _viewer_closed(self):
         # The censor marks may have changed while it was open.

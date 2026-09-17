@@ -11,7 +11,8 @@
 #     environment), so it is excluded to stop it being dragged in.
 
 from PyInstaller.utils.hooks import (
-    collect_data_files, collect_dynamic_libs, collect_submodules,
+    collect_all, collect_data_files, collect_dynamic_libs,
+    collect_submodules,
 )
 
 datas = [("overlay.html", "."), ("tools/7zr.exe", "tools"),
@@ -28,6 +29,24 @@ for pkg in ("ctranslate2", "onnxruntime"):
 hiddenimports += collect_submodules("avcore")
 hiddenimports += collect_submodules("avgui")
 hiddenimports += ["selftest"]
+
+# Video playback and the poster frames the gallery draws for clips.
+# PyAV is imported lazily inside avcore.video, so PyInstaller cannot see
+# it by following imports, and QtMultimedia is only reached through
+# strings in the player.
+hiddenimports += collect_submodules("av")
+
+# Naming these as hidden imports is not enough on its own: the PySide6
+# hook copies the Qt DLLs for modules it can see being used, and the
+# player reaches QtMultimediaWidgets only through a function-level
+# import. Without collecting it, QtMultimedia arrives (the easter egg
+# uses it) while QtMultimediaWidgets does not, and video playback fails
+# in the packaged build while working perfectly from source.
+for _module in ("PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"):
+    _extra_datas, _extra_binaries, _extra_hidden = collect_all(_module)[:3]
+    datas += _extra_datas
+    binaries += _extra_binaries
+    hiddenimports += _extra_hidden
 
 # Per-application capture is built on COM. comtypes generates interface
 # code at runtime and pycaw enumerates audio sessions; neither is reachable
@@ -65,8 +84,11 @@ excludes = [
     "PySide6.QtHelp", "PySide6.QtUiTools",
     # QtMultimedia is NOT excluded: the theme sound effects need it, and
     # excluding it here silently produced a build where turning sounds on
-    # did nothing at all.
-    "PySide6.QtMultimediaWidgets", "PySide6.QtCharts", "PySide6.QtPdf",
+    # did nothing at all. QtMultimediaWidgets is not excluded either, for
+    # the same reason one step along - the gallery's clip player draws
+    # into a QVideoWidget, and with it excluded the player failed only in
+    # the packaged build while working perfectly from source.
+    "PySide6.QtCharts", "PySide6.QtPdf",
     "PySide6.QtPdfWidgets", "PySide6.QtWebSockets", "PySide6.QtWebChannel",
     "PySide6.QtSerialPort", "PySide6.QtBluetooth", "PySide6.QtNfc",
     "PySide6.QtPositioning", "PySide6.QtSensors", "PySide6.Qt3DCore",

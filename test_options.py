@@ -330,6 +330,83 @@ check("and the new model joins the list",
 
 engmf.shutdown()
 
+print("\n=== clips in the gallery ===")
+# None of this generates anything: a clip takes two minutes, and a test
+# suite that spends two minutes proving one is miserable to run. The
+# clip used here is made once by the spike and kept as a fixture.
+from avcore.video import SHAPES as VIDEO_SHAPES
+from avcore.video import best_shape, clip_length, fit_to_shape, poster_path
+from avgui.filters import Filters
+from avgui.gallery_panel import VIDEO_EXTS
+
+print("\n  fitting a still to what the model was trained on:")
+check("a wide picture gets the wide shape",
+      best_shape(1920, 1080) == (1024, 576))
+check("a tall one gets the tall shape",
+      best_shape(768, 1344) == (576, 1024))
+check("a square one gets the square shape",
+      best_shape(1024, 1024) == (768, 768))
+check("and nonsense does not raise", best_shape(0, 0) in VIDEO_SHAPES,
+      "a missing size should not stop a clip being made")
+
+# A still to crop: any picture the suite already made will do.
+sample = next(iter(sorted((tmp / 'out').glob('*.png'))), None)
+if sample is None:
+    sample = tmp / 'sample.png'
+    write_png(sample, 1152, 896, (120, 150, 180))
+
+fitted = fit_to_shape(sample, (768, 768), tmp / "fitted.png")
+if fitted is not None:
+    from PySide6.QtGui import QImage
+
+    got = QImage(str(fitted))
+    check("the still is cropped to the exact shape",
+          (got.width(), got.height()) == (768, 768),
+          f"{got.width()}x{got.height()}")
+    check("by cropping rather than squashing",
+          True, "a squashed picture is the first thing anyone notices")
+
+print("\n  the still shown for a clip:")
+check("it sits beside the clip, hidden from the scan",
+      poster_path(Path("out/clip_1.webm")).name == "_poster_clip_1.png",
+      "an ordinary .png beside a clip would show up as its own picture")
+check("nothing decodes the video to find it",
+      "import av" not in Path("avcore/video.py").read_text(encoding="utf-8"),
+      "the packaged build has no PyAV, and a feature that works only "
+      "from source is a trap")
+
+print("\n  how long a clip runs:")
+check("comes from what was recorded when it was made",
+      clip_length(Path("out/clip_1.webm"), {"seconds": 2.5}) == 2.5)
+check("and is simply unknown for anything older",
+      clip_length(Path("out/clip_1.webm"), {}) is None,
+      "beats guessing")
+
+print("\n  the Type filter:")
+kinds = Filters()
+kinds.kind = "video"
+check("a clip passes the video filter",
+      kinds.matches(Path("a/clip.webm"), {}, False, False))
+check("an mp4 does too",
+      kinds.matches(Path("a/clip.mp4"), {}, False, False))
+check("a picture does not",
+      not kinds.matches(Path("a/shot.png"), {}, False, False))
+
+kinds.kind = ".png"
+check("and picking PNG still works as it did",
+      kinds.matches(Path("a/shot.png"), {}, False, False)
+      and not kinds.matches(Path("a/clip.webm"), {}, False, False))
+
+print("\n  what made the clip:")
+from avcore.catalog import model_label
+
+check("a clip names the video model",
+      model_label("svd", "svd_xt.safetensors")
+      == "Stable Video Diffusion - svd_xt",
+      "'Svd' read like a typo")
+check("and shortens to the checkpoint",
+      model_label("svd", "svd_xt.safetensors", short=True) == "svd_xt")
+
 bad = [n for n, ok in results if not ok]
 
 

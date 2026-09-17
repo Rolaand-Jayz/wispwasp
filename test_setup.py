@@ -324,7 +324,7 @@ print("\n=== the faults that made this unstable ===")
 # ignored in another. Each is pinned here because the symptom - "it
 # keeps switching back", "it generates with the wrong thing" - is
 # miserable to diagnose from the outside.
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from avcore.engine import Engine
 from avcore.images import ComfyBackend
@@ -624,6 +624,74 @@ check("the stray is left where it is for the person to judge",
 print("\n  a clone install has no stray folder to worry about:")
 check("nothing is reported", stray_checkpoints(sc) == [],
       "the two paths are the same there")
+
+print("\n=== animating a still is opt-in ===")
+# Another 8.9GB and a card that can hold it. Plenty of people want
+# neither, so nothing is fetched and the menu entry stays hidden until
+# somebody asks.
+from avcore.setup import VIDEO_MODEL, video_file, video_installed
+from avcore.video import LENGTHS, SIZES, plan, shape_for
+
+vid = tmp / "videocheck" / "ComfyUI"
+(vid / "models" / "checkpoints").mkdir(parents=True, exist_ok=True)
+(vid / "main.py").write_text("#")
+(vid / ".venv" / "Scripts").mkdir(parents=True, exist_ok=True)
+(vid / ".venv" / "Scripts" / "python.exe").write_bytes(b"x")
+
+sv = Settings.load(path=tmp / "video.json")
+sv.set("comfyui.path", str(vid))
+sv.save()
+
+check("it is not installed to begin with", not video_installed(sv))
+
+partial = video_file(sv)
+partial.write_bytes(b"0" * 1000)
+check("and a stub of a file does not count as installed",
+      not video_installed(sv),
+      "a part-finished 8.9GB download would otherwise look ready")
+partial.unlink()
+
+print("\n  the lengths offered are the ones that worked:")
+check("four of them", len(LENGTHS) == 4, str(len(LENGTHS)))
+check("every one has a measured estimate",
+      all(estimate > 60 for _f, _s, _l, estimate in LENGTHS))
+check("longer clips are made smaller",
+      all(SIZES["landscape"][i][0] > SIZES["landscape"][i + 1][0]
+          for i in range(len(SIZES["landscape"]) - 1)),
+      "asking for 10s at full size takes ComfyUI down, not just longer")
+
+widest = plan(25, "landscape")
+longest = plan(100, "landscape")
+check("the shortest is the biggest picture",
+      widest[0] * widest[1] > longest[0] * longest[1],
+      f"{widest[0]}x{widest[1]} against {longest[0]}x{longest[1]}")
+check("and they cost about the same",
+      abs(widest[3] - longest[3]) < 90,
+      f"{widest[3]}s against {longest[3]}s")
+
+print("\n  the shape follows the picture:")
+check("a wide one is landscape", shape_for(1920, 1080) == "landscape")
+check("a tall one is portrait", shape_for(768, 1344) == "portrait")
+check("a square one is square", shape_for(1024, 1024) == "square")
+check("every shape covers every length",
+      all(len(sizes) == len(LENGTHS) for sizes in SIZES.values()))
+
+print("\n  what the dialog tells somebody:")
+from avgui.dialogs import ConfirmAnimate
+
+dialog = ConfirmAnimate("a_picture.png", "landscape")
+words = " ".join(l.text() for l in dialog.findChildren(QLabel))
+check("that there is no sound", "no sound" in words)
+check("that a prompt cannot steer it", "prompt cannot steer" in words,
+      "this model takes the picture and nothing else")
+check("that live generation waits its turn",
+      "queued" in words and "one job at a time" in words,
+      "the thing somebody would otherwise discover mid-stream")
+check("and how long the chosen option takes",
+      "to make" in dialog.detail.text(), dialog.detail.text())
+check("it hands back the choice", dialog.choice()[0] in
+      [frames for frames, _s, _l, _e in LENGTHS])
+dialog.reject()
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

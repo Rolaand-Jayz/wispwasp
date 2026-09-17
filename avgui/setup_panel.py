@@ -91,6 +91,44 @@ class CheckRow(QWidget):
         self.detail.setText(detail)
 
 
+class ModelFetch(QThread):
+    """
+    Downloads the video model, resumably, off the interface thread.
+
+    Uses the same fetcher as the model catalogue, so a part-finished
+    8.9GB download is picked up where it stopped rather than started
+    again - which at this size is the difference between an annoyance
+    and an afternoon.
+    """
+
+    progress = Signal(int, int)
+    done = Signal(str)          # empty when it worked
+
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self.s = settings
+
+    def run(self):
+        from avcore.models import ModelInfo, download
+        from avcore.setup import VIDEO_MODEL, checkpoints_dir
+
+        info = ModelInfo(
+            name=VIDEO_MODEL["label"],
+            description="",
+            base_model="SVD",
+            nsfw=False,
+            file_name=VIDEO_MODEL["name"],
+            size_bytes=VIDEO_MODEL["bytes"],
+            download_url=VIDEO_MODEL["url"],
+        )
+        try:
+            download(info, checkpoints_dir(self.s),
+                     on_progress=lambda a, b: self.progress.emit(a, b))
+            self.done.emit("")
+        except Exception as exc:
+            self.done.emit(str(exc))
+
+
 class UpdateCheck(QThread):
     """
     Asks whether a newer build exists, off the interface thread.
@@ -347,6 +385,32 @@ class SetupPanel(QWidget):
             }
 
         self.how.idClicked.connect(self._pick_how)
+
+        # An extra rather than one of the choices above: it sits beside
+        # whichever of them is picked, and only matters to people who
+        # want it.
+        from avcore.setup import VIDEO_MODEL
+
+        extra = QHBoxLayout()
+        extra.setSpacing(8)
+        self.video_label = QLabel(f"      {VIDEO_MODEL['label']}")
+        self.video_label.setWordWrap(True)
+        extra.addWidget(self.video_label, 1)
+        self.video_btn = QPushButton("Install")
+        self.video_btn.clicked.connect(self._toggle_video)
+        extra.addWidget(self.video_btn)
+        column.addLayout(extra)
+
+        self.video_note = QLabel("      " + VIDEO_MODEL["note"])
+        self.video_note.setObjectName("fieldLabel")
+        self.video_note.setWordWrap(True)
+        column.addWidget(self.video_note)
+
+        self.video_bar = QProgressBar()
+        self.video_bar.setTextVisible(True)
+        self.video_bar.hide()
+        column.addWidget(self.video_bar)
+
         return box
 
     def _updates_section(self):
@@ -425,6 +489,81 @@ class SetupPanel(QWidget):
 
         if RELEASES_PAGE:
             webbrowser.open(RELEASES_PAGE)
+
+    def _sync_video(self):
+        """Say whether the video extra is installed, and offer the opposite."""
+        from avcore.setup import VIDEO_MODEL, video_installed
+
+        busy = (getattr(self, "_video_worker", None) is not None
+                and self._video_worker.isRunning())
+        have = video_installed(self.s)
+
+        self.video_btn.setEnabled(not busy)
+        self.video_btn.setText("Uninstall" if have else "Install")
+        self.video_btn.setObjectName("denyButton" if have else "")
+        self.video_btn.style().unpolish(self.video_btn)
+        self.video_btn.style().polish(self.video_btn)
+
+        size = VIDEO_MODEL["bytes"] / 1_073_741_824
+        self.video_note.setText(
+            "      " + VIDEO_MODEL["note"]
+            + ("   Installed." if have
+               else f"   Not installed, {size:.1f} GB to download."))
+
+    def _toggle_video(self):
+        """Fetch the video model, or remove it."""
+        from avcore.setup import VIDEO_MODEL, video_file, video_installed
+
+        from .dialogs import ConfirmInstall, ConfirmUninstall
+
+        if video_installed(self.s):
+            path = video_file(self.s)
+            size = f"{path.stat().st_size / 1_073_741_824:.1f} GB"
+            if ConfirmUninstall(VIDEO_MODEL["label"], size, False,
+                                self).exec() != QDialog.Accepted:
+                return
+            try:
+                path.unlink()
+            except OSError as exc:
+                self.status.setText(
+                    f"Could not remove it: {exc.strerror or exc}")
+                return
+            self.status.setText(
+                f"Removed the video model, freeing {size}.")
+            self.refresh()
+            return
+
+        size = f"{VIDEO_MODEL['bytes'] / 1_073_741_824:.1f} GB"
+        if ConfirmInstall(VIDEO_MODEL["label"], size,
+                          video_file(self.s).parent,
+                          self).exec() != QDialog.Accepted:
+            return
+
+        self.video_bar.setRange(0, 100)
+        self.video_bar.setValue(0)
+        self.video_bar.show()
+        self._video_worker = ModelFetch(self.s, self)
+        self._video_worker.progress.connect(self._video_progress)
+        self._video_worker.done.connect(self._video_done)
+        self._video_worker.start()
+        self._sync_video()
+
+    def _video_progress(self, done, total):
+        if total:
+            self.video_bar.setValue(int(done * 100 / total))
+            self.video_bar.setFormat(
+                f"%p%   {done / 1_073_741_824:.1f} of "
+                f"{total / 1_073_741_824:.1f} GB")
+
+    def _video_done(self, message):
+        self.video_bar.hide()
+        if message:
+            self.status.setText(message)
+        else:
+            self.status.setText(
+                "The video model is installed. Animate this... now "
+                "appears on gallery pictures.")
+        self.refresh()
 
     def _sync_tiers(self):
         """
@@ -610,6 +749,7 @@ class SetupPanel(QWidget):
         # The per-model rows read the same report, so they are brought
         # up to date in the same pass rather than on their own timer.
         self._sync_tiers()
+        self._sync_video()
         self.ready_changed.emit(rep["ready"])
         return rep
 

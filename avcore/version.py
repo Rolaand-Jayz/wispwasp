@@ -8,7 +8,7 @@ filename typed out separately - two places to change and one of them
 easy to forget.
 """
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 # Where the app looks to find out whether a newer build exists. Filled
 # in once the releases are published; an empty value simply means the

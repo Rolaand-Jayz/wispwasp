@@ -983,6 +983,53 @@ convention - is still outstanding.
 
 ---
 
+## Animating a still
+
+An extra rather than part of the app: another 8.9GB and a card that can
+hold it. Nothing is fetched and the menu entry stays hidden until
+somebody turns it on in Setup, because the point of an opt-in is that
+people who do not want video never pay for it.
+
+Stable Video Diffusion is the model because it is the only family that
+fits 12GB without quantised weights and offloading. It takes an image
+and nothing else - no prompt can steer it - and it produces no sound.
+Models that accept a prompt for image-to-video want more memory than
+this card has, and the only open model generating synchronised audio in
+one pass needs a text encoder larger than the whole card.
+
+**The lengths offered are the ones that worked, measured rather than
+reasoned about.** A longer clip only fits if each frame is smaller:
+
+    frames   landscape    seconds   measured
+       25   1024 x 576      2.5       192s
+       50    768 x 432      5.0       199s
+       75    640 x 360      7.5       206s
+      100    512 x 288     10.0       172s
+
+Asking for 50 frames at the full 1024x576 does not merely run slowly.
+The per-step time went 6s, 18s, 34s, 76s as it spilled out of memory,
+and then ComfyUI aborted - the process, not the job. Trading size for
+length keeps the total work roughly constant, which is why every option
+lands near three minutes.
+
+That crash is also why a run of refused connections while polling is
+read as ComfyUI having died rather than waited out: sitting through a
+thirty minute timeout after the far end has gone is indistinguishable
+from the app hanging.
+
+The progress bar counts against the measured estimate rather than
+against real progress, because ComfyUI offers none over HTTP. Once it
+passes the estimate it says "any moment now" rather than showing a full
+bar that sits there, which would be a lie of a different kind.
+
+Posters for the gallery are written by ComfyUI at the same time as the
+clip, and a clip's length is recorded in the catalogue. Nothing decodes
+video at runtime: PyAV is deliberately excluded from builds to save
+sixty megabytes, and a feature that works only when run from source is
+worse than no feature.
+
+---
+
 ## A label that fought the layout
 
 The preview is a QLabel that rescales its pixmap on every resize. A

@@ -85,6 +85,9 @@ class Engine:
         # Which kind the current backend object was built for, so a
         # change of mind can be noticed.
         self._backend_kind = None
+        # Set when a clip should stop; read by the video backend's own
+        # polling loop.
+        self._video_cancel = False
         self._launcher = None
         self._comfy_attempt = 0.0
         self._clip_seq = 0
@@ -882,6 +885,60 @@ class Engine:
         return target
 
     # ---- overlay -------------------------------------------------------
+
+    def animate_image(self, source, on_progress=None):
+        """
+        Turn one still into a clip. Blocking; callers use a thread.
+
+        Deliberately nothing to do with the listening cycle. A clip
+        takes about two minutes, and the live loop puts a picture up
+        every twenty seconds - they cannot share a queue without one
+        of them starving.
+        """
+        from .video import VideoBackend
+
+        source = Path(source)
+        backend = VideoBackend(self.s)
+        if not backend.available():
+            raise GenerationError(
+                f"The video model is not installed yet "
+                f"({backend.checkpoint()}).")
+
+        out_dir = self.s.dir_for("paths.overlay_dir", "output")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        target = out_dir / f"clip_{stamp}.webm"
+
+        self._video_cancel = False
+        clip = backend.animate(
+            source, target,
+            cancel=lambda: self._video_cancel,
+            on_progress=on_progress)
+        if clip is None:
+            return None
+
+        # Recorded like any other output, carrying where it came from so
+        # the gallery can say "animated from that picture".
+        entry = self.catalog.lookup(source) or {}
+        frames = int(self.s.get("video.frames", 25))
+        fps = max(1, int(self.s.get("video.fps", 10)))
+        self.catalog.record(
+            clip, entry.get("prompt") or f"animated from {source.name}",
+            source="video",
+            transcript=entry.get("transcript", ""),
+            backend="svd",
+            model=backend.checkpoint(),
+            seconds=frames / fps)
+        return clip
+
+    def cancel_video(self):
+        """Stop a clip part way. What has been sampled is discarded."""
+        self._video_cancel = True
+        try:
+            from .video import VideoBackend
+
+            VideoBackend(self.s).interrupt()
+        except Exception:
+            pass
 
     def clear_overlay(self):
         """
