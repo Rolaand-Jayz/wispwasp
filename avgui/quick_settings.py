@@ -116,6 +116,21 @@ class QuickSettings(QWidget):
         self.cfg.setMaximumWidth(140 if not compact else 136)
         column.addWidget(self.cfg)
 
+        if compact:
+            # A combo sizes itself to its longest entry, and a spin box
+            # to its prefix plus its widest value. Left alone, this row
+            # demanded 756px and helped hold the Live panel open - which
+            # in the split layout is width the divider cannot give back.
+            # Each control is told the least it can live with; the text
+            # elides rather than the panel refusing to narrow.
+            for box in (self.backend, self.model, self.size):
+                box.setMinimumContentsLength(6)
+                box.setSizeAdjustPolicy(
+                    QComboBox.AdjustToMinimumContentsLengthWithIcon)
+                box.setMinimumWidth(70)
+            self.steps.setMinimumWidth(64)
+            self.cfg.setMinimumWidth(70)
+
         self.note = QLabel("")
         self.note.setObjectName("sectionLabel")
         self.note.setWordWrap(not compact)

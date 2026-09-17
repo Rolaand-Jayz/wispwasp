@@ -6,6 +6,7 @@ rather than rebuilding them, and that no widget gets destroyed by Qt's
 parent ownership along the way.
 """
 import time
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -317,6 +318,81 @@ check("and turning it back on", s.get("image.manual_auto_push") is True)
 check("the tick says what the style adds",
       "Adds:" in win.live.use_suffix.toolTip(),
       win.live.use_suffix.toolTip())
+
+print("\n=== the divider does not fight the picture ===")
+# A QLabel reports its size hints from whatever pixmap it holds, and the
+# preview replaces its pixmap on every resize. So the layout asked how
+# big it wanted to be, the answer changed, the layout resized it, and
+# round again - which in the split layout looked like the divider
+# jumping about under the hand as soon as an image was on screen.
+import shutil as _shutil
+
+from avgui.widgets import ImagePreview
+from demo_stubs import write_png
+
+# This suite runs against the real settings, so the pictures it needs
+# go somewhere of their own and are cleared up afterwards.
+drag_tmp = Path("_dragcheck")
+_shutil.rmtree(drag_tmp, ignore_errors=True)
+drag_tmp.mkdir(parents=True, exist_ok=True)
+
+win.set_layout("split")
+win.show_panel("live")
+pump(0.6)
+
+preview = win.live.preview
+empty_min = preview.minimumSizeHint().width()
+check("the preview has a modest floor to start with",
+      empty_min <= 400, f"{empty_min}px")
+
+
+def travel():
+    splitter = win.splitter
+    total = sum(splitter.sizes())
+    splitter.setSizes([80, total - 80])
+    pump(0.2)
+    left = splitter.sizes()[0]
+    splitter.setSizes([total - 80, 80])
+    pump(0.2)
+    right = splitter.sizes()[0]
+    return left, right
+
+
+before = travel()
+
+shot = drag_tmp / "wide.png"
+write_png(shot, 1920, 1080, (190, 130, 90))
+eng.publish_overlay(shot, source="manual")
+pump(1.0)
+
+check("a picture does not raise the preview's floor",
+      preview.minimumSizeHint().width() == empty_min,
+      f"{preview.minimumSizeHint().width()}px, was {empty_min}px")
+
+after = travel()
+check("nor take away any of the divider's travel", after == before,
+      f"{before} then {after}")
+
+huge = drag_tmp / "huge.png"
+write_png(huge, 3000, 3000, (90, 140, 190))
+eng.publish_overlay(huge, source="manual")
+pump(1.0)
+check("and a very large one changes nothing either",
+      preview.minimumSizeHint().width() == empty_min
+      and travel() == before,
+      "the bigger the picture, the worse it used to get")
+
+_shutil.rmtree(drag_tmp, ignore_errors=True)
+
+check("the picture is still drawn",
+      preview.pixmap() is not None and not preview.pixmap().isNull())
+
+print("\n  the divider has somewhere to go:")
+left, right = travel()
+check("it is not pinned to a narrow band", right - left > 400,
+      f"{right - left}px of travel")
+check("and the panel can be made genuinely narrow", left < 500,
+      f"{left}px - the status bar hides what does not fit")
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

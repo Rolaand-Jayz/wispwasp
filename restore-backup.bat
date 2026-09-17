@@ -4,7 +4,7 @@ REM Your generated images in output\ and on the Desktop are not touched,
 REM and neither are the two .venv folders or your ComfyUI models.
 cd /d "%~dp0"
 
-set SNAP=backup\2026-09-15-v0.1.4
+set SNAP=backup\2026-09-15-v0.1.5
 
 if not exist "%SNAP%\app.py" (
   echo ERROR: snapshot not found at %SNAP%

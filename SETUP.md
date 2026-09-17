@@ -983,6 +983,36 @@ convention - is still outstanding.
 
 ---
 
+## A label that fought the layout
+
+The preview is a QLabel that rescales its pixmap on every resize. A
+QLabel reports its size hints from whatever pixmap it holds, so the
+layout asked how big it wanted to be, the answer changed, the layout
+resized it, and round again. In the split layout that feedback was
+visible as the divider jumping about under the hand as soon as an image
+appeared, and it got worse the larger the picture: a 1920-wide image
+demanded 927px from a panel happy with 320px a moment before.
+
+`sizeHint` was already pinned. `minimumSizeHint` was not, and that
+is the one the layout uses for its floor. Both are now fixed and the
+size policy is `Ignored`, so the contents never get a say in the size.
+
+Two things made this hard to find. Driving the splitter with
+`setSizes` does not reproduce it - the splitter consults its children
+while the mouse is down, and skipping that machinery skips the fault.
+And the numbers looked innocent from outside: the travel did not change,
+because a different widget happened to be setting the floor.
+
+**The floor itself was its own bug.** `_fit_status_bar` sheds the
+meter, the counters and three buttons as the panel narrows and is
+written down to about 330px, but the layout never let it get there: the
+minimum was worked out while everything was still visible, so it
+reported 760px, so the panel could not narrow, so nothing was ever
+hidden. Saying plainly how narrow the bar may go breaks the circle - the
+divider went from 193px of travel to about 900px.
+
+---
+
 ## The controls beside the prompt box
 
 The few settings people change while working - backend, model, size,

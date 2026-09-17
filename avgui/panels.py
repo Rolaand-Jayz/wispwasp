@@ -185,6 +185,15 @@ class LivePanel(QWidget):
         # --- status bar ------------------------------------------------
         bar = QWidget()
         bar.setObjectName("statusBar")
+        # _fit_status_bar hides the meter, the counters and three of the
+        # buttons as the panel narrows, and is written down to about
+        # 330px. The layout never let it get there: the minimum is
+        # worked out while everything is still visible, so it reported
+        # 760px and the panel could not narrow, so nothing was ever
+        # hidden. Saying plainly how narrow it may go breaks that
+        # circle - in the split layout it is the difference between the
+        # divider having 193px of travel and having most of the window.
+        bar.setMinimumWidth(320)
         bar.setFixedHeight(46)
         row = QHBoxLayout(bar)
         row.setContentsMargins(14, 0, 12, 0)

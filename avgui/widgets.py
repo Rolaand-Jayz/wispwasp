@@ -78,6 +78,14 @@ class ImagePreview(QLabel):
     Rescaling happens from the original pixmap on every resize, never from
     an already-scaled copy, which would compound softness each time the
     window moved.
+
+    Both size hints are fixed, and the size policy ignores the contents.
+    A QLabel normally reports hints based on whatever pixmap it holds,
+    and this one replaces its pixmap on every resize - so the layout
+    asked the label how big it wanted to be, the answer changed, the
+    layout resized it, and round again. In a splitter that feedback is
+    visible as the divider jumping about under the hand once an image is
+    on screen, and it got worse the larger the picture was.
     """
 
     def __init__(self, parent=None):
@@ -85,7 +93,10 @@ class ImagePreview(QLabel):
         self.setObjectName("preview")
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(320, 180)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Ignored rather than Expanding: it still takes all the room
+        # going, but the pixmap inside it never gets a say in how much
+        # that is.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self._source = None
         self._path = None
         self.setText("Nothing on the overlay yet")
@@ -124,6 +135,16 @@ class ImagePreview(QLabel):
 
     def sizeHint(self):
         return QSize(720, 405)
+
+    def minimumSizeHint(self):
+        """
+        A fixed floor, whatever is being shown.
+
+        Inherited from QLabel this tracks the pixmap, which is how a
+        1920-wide image ended up demanding 927px of a panel that was
+        happy with 320 a moment earlier.
+        """
+        return QSize(320, 180)
 
 
 class LevelMeter(QWidget):
