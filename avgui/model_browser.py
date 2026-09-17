@@ -393,6 +393,22 @@ class ModelBrowser(QDialog):
         self.manage_note.setObjectName("fieldLabel")
         self.manage_note.setWordWrap(True)
         column.addWidget(self.manage_note)
+
+        # Anyone who downloaded a model on a portable install before the
+        # folder was worked out properly has gigabytes sitting where
+        # ComfyUI never looks. Rather than leave them to find that out,
+        # the row appears only when there is something to rescue.
+        stray_row = QHBoxLayout()
+        self.stray_note = QLabel("")
+        self.stray_note.setObjectName("fieldLabel")
+        self.stray_note.setWordWrap(True)
+        stray_row.addWidget(self.stray_note, 1)
+        self.stray_btn = QPushButton("Move them")
+        self.stray_btn.clicked.connect(self._adopt_strays)
+        stray_row.addWidget(self.stray_btn)
+        self.stray_note.hide()
+        self.stray_btn.hide()
+        column.addLayout(stray_row)
         return page
 
     # ---- where things go -------------------------------------------------
@@ -401,13 +417,17 @@ class ModelBrowser(QDialog):
         """
         ComfyUI's checkpoints folder.
 
-        Derived from the configured install rather than stored
-        separately, so it cannot drift out of step with wherever ComfyUI
-        actually is.
+        Asked of the locator rather than assumed. There are two layouts:
+        a git clone keeps models under <root>/models, while the portable
+        build - which is what setup installs - buries them under
+        <root>/ComfyUI_windows_portable/ComfyUI/models. Assuming the
+        first meant that on a portable install every download landed in
+        a folder ComfyUI never reads, so models arrived and then simply
+        were not there.
         """
-        root = (self.s.get("comfyui.path") or "").strip()
-        base = Path(root) if root else Path.home() / "ComfyUI"
-        return base / "models" / "checkpoints"
+        from avcore.setup import checkpoints_dir
+
+        return checkpoints_dir(self.s)
 
     def _key(self):
         return (self.s.get("models.civitai_key") or "").strip() or None
@@ -456,6 +476,8 @@ class ModelBrowser(QDialog):
         else:
             self.disk.setText(f"No models yet in {folder}")
 
+        self._show_strays()
+
         # Part files are the app's own litter, so it offers to sweep it.
         leftovers = part_files(folder)
         if leftovers:
@@ -467,6 +489,42 @@ class ModelBrowser(QDialog):
         else:
             self.leftovers.setText("")
             self.tidy.hide()
+
+    def _show_strays(self):
+        """Say so when models are somewhere ComfyUI cannot see them."""
+        from avcore.setup import stray_checkpoints
+
+        strays = stray_checkpoints(self.s)
+        if not strays:
+            self.stray_note.hide()
+            self.stray_btn.hide()
+            return
+
+        total = sum(path.stat().st_size for path in strays)
+        many = len(strays) != 1
+        self.stray_note.setText(
+            f"{len(strays)} model{'s' if many else ''} ({_size(total)}) "
+            f"{'are' if many else 'is'} in a folder ComfyUI does not "
+            f"read, left there by an older version of this app. "
+            f"{'They' if many else 'It'} can be moved into place.")
+        self.stray_note.show()
+        self.stray_btn.show()
+
+    def _adopt_strays(self):
+        from avcore.setup import adopt_strays
+
+        moved, skipped, failed = adopt_strays(self.s)
+        parts = []
+        if moved:
+            parts.append(f"Moved {moved} into place")
+        if skipped:
+            parts.append(f"{skipped} already there")
+        if failed:
+            parts.append(f"{failed} could not be moved")
+        self.manage_note.setText(
+            ". ".join(parts) + "." if parts else "Nothing to move.")
+        self.refresh_installed()
+        self.installed_changed.emit()
 
     def _sync_installed(self):
         busy = self._download is not None and self._download.isRunning()

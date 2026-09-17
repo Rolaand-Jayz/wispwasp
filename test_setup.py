@@ -535,6 +535,96 @@ check("and no installer is fetched",
        ".exe" not in source,
        "the person opens the page and decides")
 
+print("\n=== the two layouts ComfyUI comes in ===")
+# A git clone keeps models under <root>/models. The portable build -
+# which is what setup installs - buries them under
+# <root>/ComfyUI_windows_portable/ComfyUI/models. Assuming the first
+# meant downloads on a portable install landed somewhere ComfyUI never
+# reads: models arrived, and then simply were not there. It was
+# invisible on a cloned install, which is why it reached somebody else
+# before it was noticed.
+from avcore.setup import checkpoints_dir as _ckdir
+
+shapes = tmp / "shapes"
+
+clone = shapes / "clone"
+(clone / "models" / "checkpoints").mkdir(parents=True)
+(clone / "main.py").write_text("#")
+(clone / ".venv" / "Scripts").mkdir(parents=True)
+(clone / ".venv" / "Scripts" / "python.exe").write_bytes(b"x")
+
+portable = shapes / "portable"
+inner = portable / "ComfyUI_windows_portable" / "ComfyUI"
+(inner / "models" / "checkpoints").mkdir(parents=True)
+(inner / "main.py").write_text("#")
+embedded = portable / "ComfyUI_windows_portable" / "python_embeded"
+embedded.mkdir(parents=True)
+(embedded / "python.exe").write_bytes(b"x")
+
+sc = Settings.load(path=tmp / "clone.json")
+sc.set("comfyui.path", str(clone))
+check("a clone keeps models at the root",
+      _ckdir(sc) == clone / "models" / "checkpoints", str(_ckdir(sc)))
+
+sp = Settings.load(path=tmp / "portable.json")
+sp.set("comfyui.path", str(portable))
+check("a portable build keeps them further in",
+      _ckdir(sp) == inner / "models" / "checkpoints", str(_ckdir(sp)))
+check("which is not what a naive guess would give",
+      _ckdir(sp) != portable / "models" / "checkpoints",
+      "the guess is why downloads vanished")
+
+print("\n  the model browser asks rather than assumes:")
+browser_source = Path("avgui/model_browser.py").read_text(encoding="utf-8")
+check("it uses the locator",
+      "checkpoints_dir" in browser_source)
+check("and does not build the path by hand",
+      'base / "models" / "checkpoints"' not in browser_source,
+      "that line only worked on one of the two layouts")
+
+print("\n  ComfyUI is told not to open its own page:")
+launcher = Path("avcore/comfy_launcher.py").read_text(encoding="utf-8")
+check("the flag is passed", "--disable-auto-launch" in launcher)
+check("alongside the standalone flag that turns it on",
+      "--windows-standalone-build" in launcher,
+      "which is why only portable installs popped up a browser tab")
+
+print("\n  models stranded by the old guess can be rescued:")
+from avcore.setup import adopt_strays, stray_checkpoints
+
+wrong = portable / "models" / "checkpoints"
+wrong.mkdir(parents=True, exist_ok=True)
+(wrong / "stranded.safetensors").write_bytes(b"0" * 600_000_000)
+(wrong / "notes.txt").write_text("not a model")
+
+strays = stray_checkpoints(sp)
+check("they are found", [path.name for path in strays]
+      == ["stranded.safetensors"], str([p.name for p in strays]))
+check("and other files are left alone",
+      all(path.suffix == ".safetensors" for path in strays))
+
+moved, skipped, failed = adopt_strays(sp)
+check("they are moved into place", moved == 1, f"moved={moved}")
+check("nothing failed", failed == 0)
+check("the file is where ComfyUI reads",
+      (_ckdir(sp) / "stranded.safetensors").exists())
+check("and no longer in the old folder",
+      not (wrong / "stranded.safetensors").exists(),
+      "moved rather than copied - nobody wants two of six gigabytes")
+check("nothing is left stranded", stray_checkpoints(sp) == [])
+
+print("\n  and it does not trample anything already there:")
+(wrong / "stranded.safetensors").write_bytes(b"0" * 600_000_000)
+moved, skipped, failed = adopt_strays(sp)
+check("a name already in use is skipped", skipped == 1 and moved == 0,
+      f"moved={moved} skipped={skipped}")
+check("the stray is left where it is for the person to judge",
+      (wrong / "stranded.safetensors").exists())
+
+print("\n  a clone install has no stray folder to worry about:")
+check("nothing is reported", stray_checkpoints(sc) == [],
+      "the two paths are the same there")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

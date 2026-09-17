@@ -599,15 +599,30 @@ def checkpoints_dir(settings=None, root=None):
         info = find_comfy(root)
         if info:
             return info["models"]
-        return Path(root) / "ComfyUI" / "models" / "checkpoints"
+        return _guess_checkpoints(Path(root))
 
     if settings is None:
-        return default_root() / "ComfyUI" / "models" / "checkpoints"
+        return _guess_checkpoints(default_root())
 
     where, info = locate(settings)
     if info:
         return info["models"]
-    return Path(where) / "ComfyUI" / "models" / "checkpoints"
+    return _guess_checkpoints(Path(where))
+
+
+def _guess_checkpoints(root):
+    """
+    Where checkpoints would go, before anything is installed.
+
+    The configured path is sometimes the ComfyUI folder itself and
+    sometimes the place ComfyUI will be put, and the two want different
+    answers. A models folder already sitting there settles it; without
+    one, assume ComfyUI has yet to arrive.
+    """
+    root = Path(root)
+    if (root / "models").exists() or root.name.lower() == "comfyui":
+        return root / "models" / "checkpoints"
+    return root / "ComfyUI" / "models" / "checkpoints"
 
 
 def tier_file(key, settings=None, root=None):
@@ -701,6 +716,61 @@ def tier_installed(key, settings=None, root=None):
     then fail to load.
     """
     return bool(models_for_tier(key, settings, root))
+
+
+def stray_checkpoints(settings=None):
+    """
+    Models sitting where ComfyUI will never look for them.
+
+    Downloads used to be written to <root>/models/checkpoints, which is
+    right for a cloned ComfyUI and wrong for the portable build, where
+    the real folder is further in. Anyone who downloaded a model on a
+    portable install before that was fixed has gigabytes stranded in a
+    folder nothing reads, so they can be found and moved rather than
+    left to be discovered by hand.
+    """
+    configured = ""
+    if settings is not None:
+        configured = (settings.get("comfyui.path") or "").strip()
+    root = Path(configured) if configured else default_root()
+
+    guessed = root / "models" / "checkpoints"
+    real = checkpoints_dir(settings)
+    if guessed == real or not guessed.exists():
+        return []
+    return [path for path in sorted(guessed.glob("*.safetensors"))
+            if path.stat().st_size > PLAUSIBLE_MODEL_BYTES]
+
+
+def adopt_strays(settings=None):
+    """
+    Move stranded models into the folder ComfyUI reads.
+
+    Moved rather than copied - they are the same file and nobody wants
+    two copies of six gigabytes - and skipped rather than overwritten if
+    something of that name is already there.
+
+    Returns (moved, skipped, failed).
+    """
+    target = checkpoints_dir(settings)
+    target.mkdir(parents=True, exist_ok=True)
+    moved = skipped = failed = 0
+    for path in stray_checkpoints(settings):
+        destination = target / path.name
+        if destination.exists():
+            skipped += 1
+            continue
+        try:
+            path.replace(destination)
+            moved += 1
+        except OSError:
+            # Usually a different drive, where replace cannot work.
+            try:
+                shutil.move(str(path), str(destination))
+                moved += 1
+            except (OSError, shutil.Error):
+                failed += 1
+    return moved, skipped, failed
 
 
 def installed_tiers(settings=None, root=None):

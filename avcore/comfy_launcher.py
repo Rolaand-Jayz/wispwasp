@@ -102,7 +102,14 @@ class ComfyLauncher:
                 f".venv folder alongside main.py - with its requirements "
                 f"installed. Starting ComfyUI once by hand will create it.")
             return False
-        cmd += ["--port", port]
+        # --windows-standalone-build turns on "convenient things", one of
+        # which is opening ComfyUI's own page in a browser at startup.
+        # That is reasonable when somebody runs the portable build
+        # themselves; it is baffling when an app they launched pops up a
+        # workflow editor full of errors about models they have never
+        # heard of. Only portable installs pass that flag, which is why
+        # it was invisible on a cloned one.
+        cmd += ["--port", port, "--disable-auto-launch"]
 
         try:
             self.process = subprocess.Popen(
