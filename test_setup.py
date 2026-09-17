@@ -429,6 +429,112 @@ setup.close()
 panel.close()
 _pump(0.2)
 
+print("\n=== checking for a newer build ===")
+# It only ever finds out and offers a link. Downloading and running an
+# installer on somebody else's machine is a different level of
+# responsibility, and without code signing this app has no business
+# taking it - so there is nothing here that fetches or executes.
+import io as _io
+import json as _json
+import urllib.error as _urlerror
+
+from avcore import updates as _updates
+# Deliberately not importing `check` by name: this suite has its own
+# check() helper, and the import would shadow it and break every
+# assertion in the file.
+from avcore.updates import UpdateError, describe
+from avcore.version import __version__
+
+
+class _Answer(_io.BytesIO):
+    def __init__(self, payload, status=200):
+        super().__init__(_json.dumps(payload).encode("utf-8"))
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+        return False
+
+
+def _serving(payload):
+    return lambda request, timeout=None: _Answer(payload)
+
+
+newer = {"version": "9.9.9", "page": "https://example/releases",
+         "notes": "things", "size": 82_395_802}
+found = _updates.check(url="https://example/latest.json",
+                       opener=_serving(newer))
+check("a newer build is reported", found is not None)
+check("with its version", found["version"] == "9.9.9")
+check("and where to get it", found["page"] == "https://example/releases")
+check("described for a person",
+       "9.9.9 is available" in describe(found), describe(found))
+check("including the size", "79 MB" in describe(found), describe(found))
+
+same = {"version": __version__, "page": "https://example/releases"}
+check("the current version is not offered as an update",
+       _updates.check(url="https://example/x",
+                      opener=_serving(same)) is None)
+check("and says so plainly",
+       "latest version" in describe(None), describe(None))
+
+older = {"version": "0.0.1", "page": "https://example/releases"}
+check("an older one is not offered either",
+       _updates.check(url="https://example/x",
+                      opener=_serving(older)) is None)
+
+print("\n  when the answer is unusable:")
+junk = {"version": "not-a-version"}
+check("nonsense does not become an update",
+       _updates.check(url="https://example/x",
+                      opener=_serving(junk)) is None,
+       "it sorts low rather than raising")
+
+try:
+    _updates.check(url="https://example/x",
+                   opener=_serving({"nothing": True}))
+    check("a manifest without a version is refused", False)
+except UpdateError as exc:
+    check("a manifest without a version is refused",
+           "not readable" in str(exc))
+
+
+def _refuses(request, timeout=None):
+    raise _urlerror.HTTPError(request.full_url, 503, "Unavailable", {}, None)
+
+
+try:
+    _updates.check(url="https://example/x", opener=_refuses)
+    check("a server fault is reported plainly", False)
+except UpdateError as exc:
+    check("a server fault is reported plainly", "503" in str(exc))
+
+try:
+    # A build with no manifest configured at all. An empty url is not
+    # enough now that one is set - it falls back to it - so the constant
+    # itself is taken away for this one check.
+    _was = _updates.UPDATE_MANIFEST
+    _updates.UPDATE_MANIFEST = ""
+    _updates.check(opener=_serving(newer))
+    check("no configured source is refused", False)
+except UpdateError as exc:
+    check("no configured source is refused",
+          "No update source" in str(exc),
+          "so a build with none simply does not offer the check")
+finally:
+    _updates.UPDATE_MANIFEST = _was
+
+print("\n  nothing here downloads anything:")
+source = Path("avcore/updates.py").read_text(encoding="utf-8")
+check("no subprocess", "subprocess" not in source)
+check("nothing is executed", "Popen" not in source and "startfile" not in source)
+check("and no installer is fetched",
+       ".exe" not in source,
+       "the person opens the page and decides")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

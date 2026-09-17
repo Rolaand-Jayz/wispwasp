@@ -20,4 +20,8 @@ output/
 _*.py
 _*.png
 _*.txt
+# Scratch folders the test suites create. These hold fake checkpoints
+# of several hundred megabytes, and one of them was very nearly
+# committed.
+_*/
 build_all.txt

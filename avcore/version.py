@@ -8,17 +8,20 @@ filename typed out separately - two places to change and one of them
 easy to forget.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # Where the app looks to find out whether a newer build exists. Filled
 # in once the releases are published; an empty value simply means the
 # check is not offered.
-UPDATE_MANIFEST = ""
+UPDATE_MANIFEST = (
+    "https://github.com/sucretown/wispwasp/releases/latest/download"
+    "/latest.json"
+)
 
 # The page a person is sent to when there is one. Deliberately a page
 # rather than a direct download: they can read what changed, and see
 # older builds if they want to go back.
-RELEASES_PAGE = ""
+RELEASES_PAGE = "https://github.com/sucretown/wispwasp/releases/latest"
 
 
 def as_tuple(text=None):

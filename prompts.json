@@ -9143,30 +9143,6 @@
   "transcript": "somebody clip that, that was ridiculous",
   "at": 1789460611.2694416
  },
- "live_20260915_033338_113.png": {
-  "prompt": "we are, we are, we are, highly detailed, dramatic lighting",
-  "source": "live",
-  "transcript": "we are, we are, we are",
-  "at": 1789461220.5253067
- },
- "live_20260915_033346_565.png": {
-  "prompt": "chat is saying the audio is quiet again, is it quiet, highly detailed, dramatic lighting",
-  "source": "live",
-  "transcript": "chat is saying the audio is quiet again, is it quiet",
-  "at": 1789461228.976687
- },
- "live_20260915_033355_023.png": {
-  "prompt": "we are, we are, we are, highly detailed, dramatic lighting",
-  "source": "live",
-  "transcript": "we are, we are, we are",
-  "at": 1789461237.4352822
- },
- "live_20260915_033441_311.png": {
-  "prompt": "I genuinely did not know you could climb that wall, highly detailed, dramatic lighting",
-  "source": "live",
-  "transcript": "I genuinely did not know you could climb that wall",
-  "at": 1789461283.7201211
- },
  "live_20260915_033449_749.png": {
   "prompt": "chat is saying the audio is quiet again, is it quiet, highly detailed, dramatic lighting",
   "source": "live",
@@ -11266,5 +11242,263 @@
   "source": "live",
   "transcript": "a lighthouse over a cold grey sea",
   "at": 1789626738.157166
+ },
+ "live_20260917_021854_349.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629534.6506565
+ },
+ "live_20260917_021855_758.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629536.0646012
+ },
+ "live_20260917_021857_174.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629537.4757566
+ },
+ "ai_20260917_021857_1.png": {
+  "prompt": "a brass diving helmet on a workbench",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629537.7809827
+ },
+ "ai_20260917_021857_2.png": {
+  "prompt": "a brass diving helmet on a workbench",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629538.0873373
+ },
+ "live_20260917_021858_193.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629538.4946513
+ },
+ "live_20260917_021859_605.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629539.9060771
+ },
+ "live_20260917_021901_014.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629541.3157475
+ },
+ "live_20260917_021902_425.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629542.7263832
+ },
+ "ai_20260917_021903_1.png": {
+  "prompt": "a copper kettle",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789629544.294521
+ },
+ "ai_20260917_021905_1.png": {
+  "prompt": "an ink drawing of a crow",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789629546.1139722
+ },
+ "live_20260917_021908_487.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629548.7884948
+ },
+ "live_20260917_021909_459.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629549.760819
+ },
+ "ai_20260917_021913_1.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629553.3127618
+ },
+ "ai_20260917_021914_1.png": {
+  "prompt": "a quiet harbour at dusk",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789629554.5592968
+ },
+ "live_20260917_021914_916.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789629555.2179942
+ },
+ "live_20260917_021927_454.png": {
+  "prompt": "we are going to run it back one more time and then call it, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "we are going to run it back one more time and then call it",
+  "at": 1789629569.8640397
+ },
+ "live_20260917_021936_108.png": {
+  "prompt": "so the thing about the boss fight is you have to bait the second phase, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "so the thing about the boss fight is you have to bait the second phase",
+  "at": 1789629578.5424538
+ },
+ "ai_20260917_022012_1.png": {
+  "prompt": "a harbour at dusk",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789629612.8447018
+ },
+ "ai_20260917_022013_1.png": {
+  "prompt": "a copper kettle",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789629613.1019368
+ },
+ "live_20260917_022033_939.png": {
+  "prompt": "a lighthouse over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse over a cold grey sea",
+  "at": 1789629636.3493762
+ },
+ "live_20260917_022037_015.png": {
+  "prompt": "a lighthouse over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse over a cold grey sea",
+  "at": 1789629639.424439
+ },
+ "live_20260917_022650_912.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630011.2131317
+ },
+ "live_20260917_022652_320.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630012.6221702
+ },
+ "live_20260917_022653_731.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630014.0329664
+ },
+ "ai_20260917_022654_1.png": {
+  "prompt": "a brass diving helmet on a workbench",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630014.337718
+ },
+ "ai_20260917_022654_2.png": {
+  "prompt": "a brass diving helmet on a workbench",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630014.6436
+ },
+ "live_20260917_022654_750.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630015.0513916
+ },
+ "live_20260917_022656_160.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630016.4613411
+ },
+ "live_20260917_022657_570.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630017.871489
+ },
+ "live_20260917_022658_978.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630019.27993
+ },
+ "ai_20260917_022700_1.png": {
+  "prompt": "a copper kettle",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789630020.8481095
+ },
+ "ai_20260917_022702_1.png": {
+  "prompt": "an ink drawing of a crow",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789630022.6682343
+ },
+ "live_20260917_022705_041.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630025.3418918
+ },
+ "live_20260917_022706_014.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630026.315782
+ },
+ "ai_20260917_022709_1.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "manual",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630029.8665266
+ },
+ "ai_20260917_022710_1.png": {
+  "prompt": "a quiet harbour at dusk",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789630031.1137936
+ },
+ "live_20260917_022711_472.png": {
+  "prompt": "a lighthouse standing over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse standing over a cold grey sea",
+  "at": 1789630031.7732513
+ },
+ "live_20260917_022723_694.png": {
+  "prompt": "we are going to run it back one more time and then call it, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "we are going to run it back one more time and then call it",
+  "at": 1789630046.1035607
+ },
+ "live_20260917_022732_590.png": {
+  "prompt": "I genuinely did not know you could climb that wall, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "I genuinely did not know you could climb that wall",
+  "at": 1789630055.0896618
+ },
+ "ai_20260917_022810_1.png": {
+  "prompt": "a copper kettle",
+  "source": "manual",
+  "transcript": "",
+  "at": 1789630090.3213544
+ },
+ "live_20260917_022831_174.png": {
+  "prompt": "a lighthouse over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse over a cold grey sea",
+  "at": 1789630113.5839505
+ },
+ "live_20260917_022834_251.png": {
+  "prompt": "a lighthouse over a cold grey sea, highly detailed, dramatic lighting",
+  "source": "live",
+  "transcript": "a lighthouse over a cold grey sea",
+  "at": 1789630116.6624446
  }
 }

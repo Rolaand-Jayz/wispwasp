@@ -8,13 +8,14 @@ actually works.
 
 import threading
 
-from PySide6.QtCore import QTimer, Qt, QObject, Signal
+from PySide6.QtCore import QTimer, Qt, QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QRadioButton,
     QFileDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton,
     QVBoxLayout, QWidget,
 )
 
+from avcore.version import __version__
 from avcore import setup as avsetup
 from avcore.comfy_launcher import ComfyLauncher
 
@@ -88,6 +89,29 @@ class CheckRow(QWidget):
             colour = theme.WORKING
         self.mark.setStyleSheet(f"color: {colour}; font-weight: 600;")
         self.detail.setText(detail)
+
+
+class UpdateCheck(QThread):
+    """
+    Asks whether a newer build exists, off the interface thread.
+
+    On a thread for the usual reason: a slow or unreachable server would
+    otherwise freeze the window, which is the fault that has bitten this
+    project more than once.
+    """
+
+    answered = Signal(object)      # the newer build, or None
+    failed = Signal(str)
+
+    def run(self):
+        from avcore.updates import UpdateError, check
+
+        try:
+            self.answered.emit(check())
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:                       # pragma: no cover
+            self.failed.emit(f"The update check failed: {exc}")
 
 
 class ConfirmInstall(QDialog):
@@ -207,6 +231,7 @@ class SetupPanel(QWidget):
         outer.addWidget(blurb)
 
         outer.addWidget(self._how_section())
+        outer.addWidget(self._updates_section())
 
         self.rows = {
             "gpu": CheckRow("Graphics card"),
@@ -323,6 +348,83 @@ class SetupPanel(QWidget):
 
         self.how.idClicked.connect(self._pick_how)
         return box
+
+    def _updates_section(self):
+        """
+        Whether a newer build exists, and where to get it.
+
+        It only ever tells you and offers the page. Downloading and
+        running an installer on somebody's machine is a different level
+        of responsibility, and without code signing to back it up this
+        app has no business taking it.
+        """
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 6, 0, 0)
+        row.setSpacing(10)
+
+        self.update_note = QLabel(f"Version {__version__}")
+        self.update_note.setObjectName("fieldLabel")
+        self.update_note.setWordWrap(True)
+        row.addWidget(self.update_note, 1)
+
+        self.update_page_btn = QPushButton("Open download page")
+        self.update_page_btn.clicked.connect(self._open_releases)
+        self.update_page_btn.hide()
+        row.addWidget(self.update_page_btn)
+
+        self.update_btn = QPushButton("Check for updates")
+        self.update_btn.clicked.connect(lambda: self._check_updates(True))
+        row.addWidget(self.update_btn)
+        return box
+
+    def _check_updates(self, asked=False):
+        """
+        `asked` is True when somebody pressed the button.
+
+        It decides how loud the result is: a background check that
+        cannot reach the server says nothing, because nobody asked it a
+        question. Pressing the button and getting silence would just be
+        broken.
+        """
+        if getattr(self, "_update_worker", None) is not None \
+                and self._update_worker.isRunning():
+            return
+        self._update_asked = asked
+        if asked:
+            self.update_btn.setEnabled(False)
+            self.update_note.setText("Checking...")
+
+        self._update_worker = UpdateCheck(self)
+        self._update_worker.answered.connect(self._update_answer)
+        self._update_worker.failed.connect(self._update_failed)
+        self._update_worker.finished.connect(
+            lambda: self.update_btn.setEnabled(True))
+        self._update_worker.start()
+
+    def _update_answer(self, found):
+        from avcore.updates import describe
+
+        self.update_note.setText(describe(found))
+        self.update_page_btn.setVisible(bool(found))
+        if found:
+            self.update_page_btn.setText(
+                f"Get {found['version']}")
+
+    def _update_failed(self, message):
+        if getattr(self, "_update_asked", False):
+            self.update_note.setText(message)
+        else:
+            # Nobody asked, so nothing is said - just the version.
+            self.update_note.setText(f"Version {__version__}")
+
+    def _open_releases(self):
+        import webbrowser
+
+        from avcore.version import RELEASES_PAGE
+
+        if RELEASES_PAGE:
+            webbrowser.open(RELEASES_PAGE)
 
     def _sync_tiers(self):
         """
@@ -690,6 +792,11 @@ class SetupPanel(QWidget):
         super().showEvent(event)
         self._default_to_online_once()
         self.refresh()
+        if not getattr(self, "_update_checked", False):
+            # Once per run, quietly. Nobody wants to be told about an
+            # update every time they glance at this page.
+            self._update_checked = True
+            self._check_updates(False)
         if not hasattr(self, "_watch"):
             self._watch = QTimer(self)
             self._watch.setInterval(2000)

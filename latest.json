@@ -1,0 +1,8 @@
+{
+  "version": "0.1.2",
+  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.2/WispWasp-0.1.2-setup.exe",
+  "page": "https://github.com/sucretown/wispwasp/releases/latest",
+  "sha256": "bb9168db50741cda73f0d19eb1963e6ffb6daf7739b01b6e1cef3650205fa24a",
+  "size": 82415106,
+  "notes": "Adds a check for updates, and shows the version in the corner of the window."
+}

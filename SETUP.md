@@ -983,6 +983,38 @@ convention - is still outstanding.
 
 ---
 
+## Releases and updating
+
+The version is written in `avcore/version.py` and nowhere else. The
+window shows it in the corner, the installer takes it as a parameter,
+and `build.ps1` reads it to name the output. It used to live only in
+installer.iss, so the running app had no idea what it was - which makes
+a bug report much harder to act on.
+
+Builds are published to GitHub Releases, each carrying the installer,
+the read-me for a new person, and `latest.json` - version, download
+URL, size and SHA-256. The app reads that manifest, and if a newer
+version exists it says so and offers to open the page.
+
+**It only ever tells you.** Nothing downloads or runs an installer.
+Code that fetches and executes a binary on someone else''s machine is a
+serious thing to own, and with no code signing behind it this app has
+no business doing it. There is a test asserting the update module
+contains no subprocess call and fetches no executable, because that is
+the kind of thing that gets added later by someone being helpful.
+
+The check runs on a thread, once per session when the Setup page is
+opened, and on demand from the button. A background check that cannot
+reach the server says nothing - nobody asked it a question - while
+pressing the button and getting silence would just look broken.
+
+Rolling back is why the page is linked rather than the file: older
+releases stay there, and settings, images and models live outside the
+program folder, so an older installer can be run over the top without
+losing anything.
+
+---
+
 ## Settings that were quietly ignored
 
 Five bugs shipped together in the model-choice work, all the same shape:
