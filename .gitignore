@@ -1,0 +1,23 @@
+# Build output and local scratch
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+tools/gh/
+
+# The installer itself is published as a release asset, not committed:
+# a 79 MB binary in the history would make every clone painful.
+installer/*.exe
+
+# Snapshots of previous builds. Useful locally, not something anyone
+# else needs a copy of.
+backup/
+
+# Personal settings and anything captured while testing
+settings.json
+output/
+_*.py
+_*.png
+_*.txt
+build_all.txt

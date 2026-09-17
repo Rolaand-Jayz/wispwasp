@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Listening</title>
+<style>
+  :root { --ink: #f2efe9; --dim: #7d7970; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+
+  .stage { position: fixed; inset: 0; }
+
+  .layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 1.4s ease-in-out;
+  }
+  .layer.visible { opacity: 1; }
+
+  .empty {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    padding: 2rem;
+  }
+  .empty p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--dim);
+    max-width: 34ch;
+  }
+  .empty.gone { display: none; }
+
+  .readout {
+    position: fixed;
+    left: 1.5rem;
+    bottom: 1.5rem;
+    max-width: 46ch;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+  }
+  .readout .status { color: var(--dim); }
+  .readout .heard { color: var(--ink); margin-top: 0.35rem; }
+  .readout.hidden { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .layer { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <img class="layer" id="a" alt="">
+  <img class="layer" id="b" alt="">
+</div>
+
+<div class="empty" id="empty">
+  <p id="emptyText">Waiting for the first clip. Play something with speech in it.</p>
+</div>
+
+<div class="readout" id="readout">
+  <div class="status" id="status"></div>
+  <div class="heard" id="heard"></div>
+</div>
+
+<script>
+  const bare = new URLSearchParams(location.search).has("bare");
+  const layers = [document.getElementById("a"), document.getElementById("b")];
+  const emptyBox = document.getElementById("empty");
+  const emptyText = document.getElementById("emptyText");
+  const readout = document.getElementById("readout");
+  const statusEl = document.getElementById("status");
+  const heardEl = document.getElementById("heard");
+
+  if (bare) readout.classList.add("hidden");
+
+  let front = 0;
+  let currentImage = null;
+
+  function show(name) {
+    const next = layers[1 - front];
+    const img = new Image();
+    img.onload = () => {
+      next.src = img.src;
+      next.classList.add("visible");
+      layers[front].classList.remove("visible");
+      front = 1 - front;
+      emptyBox.classList.add("gone");
+    };
+    img.src = "/img/" + name;
+  }
+
+  function hide() {
+    // Fade whatever is showing out to nothing. The layers keep their src
+    // so the browser does not have to refetch if the same image comes
+    // back, and in bare mode the placeholder text stays hidden so an OBS
+    // source goes fully transparent rather than showing a message on
+    // stream.
+    layers.forEach(l => l.classList.remove("visible"));
+    if (!bare) {
+      emptyText.textContent = "Overlay cleared. The next image will appear here.";
+      emptyBox.classList.remove("gone");
+    }
+  }
+
+  async function poll() {
+    try {
+      const s = await (await fetch("/state.json", { cache: "no-store" })).json();
+      if (!bare) {
+        statusEl.textContent = s.status || "";
+        heardEl.textContent = s.prompt || s.heard || "";
+      }
+      if (!s.image) {
+        if (currentImage !== null) {
+          currentImage = null;
+          hide();
+        }
+      } else if (s.image !== currentImage) {
+        currentImage = s.image;
+        show(s.image);
+      }
+    } catch (e) {
+      if (!bare) statusEl.textContent = "Lost contact with WispWasp.";
+      emptyText.textContent = "Lost contact with WispWasp. Start it again and this page recovers on its own.";
+    }
+  }
+
+  poll();
+  setInterval(poll, 2000);
+</script>
+
+</body>
+</html>
