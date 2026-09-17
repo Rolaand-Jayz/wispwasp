@@ -324,6 +324,7 @@ print("\n=== the faults that made this unstable ===")
 # ignored in another. Each is pinned here because the symptom - "it
 # keeps switching back", "it generates with the wrong thing" - is
 # miserable to diagnose from the outside.
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QLabel
 
 from avcore.engine import Engine
@@ -692,6 +693,62 @@ check("and how long the chosen option takes",
 check("it hands back the choice", dialog.choice()[0] in
       [frames for frames, _s, _l, _e in LENGTHS])
 dialog.reject()
+
+print("\n  pressing Install actually opens something:")
+# Nothing exercised this button before, which is how 0.1.7 shipped with
+# a handler that raised ImportError on its first line. Qt swallows an
+# exception inside a slot, so the button simply did nothing at all.
+#
+# The dialog is stood in for rather than shown: exec() blocks until
+# somebody answers it, and a test suite has nobody to answer.
+import avgui.setup_panel as _panel_module
+from avgui.setup_panel import SetupPanel
+
+engv = Engine(sv)
+panelv = SetupPanel(engv)
+_app.processEvents()
+
+check("the row offers Install when nothing is there",
+      panelv.video_btn.text() == "Install", panelv.video_btn.text())
+check("and it is pressable", panelv.video_btn.isEnabled())
+
+asked = []
+
+
+class _Stub:
+    """Stands in for the confirmation, and declines."""
+
+    def __init__(self, *args, **kwargs):
+        asked.append(args[0] if args else "?")
+
+    def exec(self):
+        from PySide6.QtWidgets import QDialog
+
+        return QDialog.Rejected
+
+
+_real = _panel_module.ConfirmInstall
+_panel_module.ConfirmInstall = _Stub
+try:
+    panelv._toggle_video()
+    raised = ""
+except Exception as exc:
+    raised = f"{type(exc).__name__}: {exc}"
+finally:
+    _panel_module.ConfirmInstall = _real
+
+check("the handler runs without raising", not raised,
+      raised or "clean - it used to raise ImportError here")
+check("and it asks before downloading 8.9 GB", len(asked) == 1,
+      f"{len(asked)} confirmations")
+check("naming what it would install",
+      asked and "Animate" in str(asked[0]), str(asked[:1]))
+check("there is a bar for the download", hasattr(panelv, "video_bar"))
+check("nothing was fetched after declining",
+      not video_installed(sv), "declining must mean declining")
+
+engv.shutdown()
+panelv.deleteLater()
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

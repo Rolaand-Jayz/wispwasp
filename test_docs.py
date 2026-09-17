@@ -206,6 +206,57 @@ check("nonsense sorts low rather than raising",
       "a malformed manifest must not stop the app starting")
 check("and parses to something", as_tuple("rubbish") == (0,))
 
+print("\n=== every local import resolves ===")
+# An import inside a function fails at the moment it runs, and Qt
+# swallows an exception raised inside a slot - so a button whose handler
+# imports something that is not there does nothing at all, with no
+# error anywhere. Exactly that shipped in 0.1.7: the video Install
+# button imported two dialogs from the wrong module and looked dead.
+import ast as _ast
+import re as _re
+
+
+def _exported(path):
+    """Top-level names a module offers, aliases included."""
+    names = set()
+    for node in _ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, (_ast.ClassDef, _ast.FunctionDef,
+                             _ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, _ast.Assign):
+            for target in node.targets:
+                if isinstance(target, _ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, (_ast.Import, _ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+    return names
+
+
+_broken = []
+for _source in sorted(Path("avgui").glob("*.py")):
+    _text = _source.read_text(encoding="utf-8")
+    for _match in _re.finditer(r"from \.(\w+) import ([^\n(]+)", _text):
+        _module, _names = _match.group(1), _match.group(2)
+        _target = Path("avgui") / f"{_module}.py"
+        if not _target.exists():
+            continue
+        _have = _exported(_target)
+        _line = _text[:_match.start()].count("\n") + 1
+        for _name in (n.strip() for n in _names.split(",")):
+            if not _name:
+                continue
+            # "thing as other" is still an import of "thing".
+            _wanted = _name.split(" as ")[0].strip()
+            if _wanted and _wanted not in _have:
+                _broken.append(
+                    f"{_source.name}:{_line} imports {_wanted} "
+                    f"from {_module}")
+
+check("nothing imports a name its module does not have",
+      not _broken,
+      "; ".join(_broken) if _broken else "all of them resolve")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

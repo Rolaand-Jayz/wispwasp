@@ -512,9 +512,12 @@ class SetupPanel(QWidget):
 
     def _toggle_video(self):
         """Fetch the video model, or remove it."""
+        # ConfirmInstall and ConfirmUninstall are defined in this
+        # module, not in dialogs. Importing them from there raised, and
+        # Qt swallows an exception inside a slot - so the button looked
+        # dead rather than broken, which is the worst way for it to
+        # fail.
         from avcore.setup import VIDEO_MODEL, video_file, video_installed
-
-        from .dialogs import ConfirmInstall, ConfirmUninstall
 
         if video_installed(self.s):
             path = video_file(self.s)
