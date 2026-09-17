@@ -20,6 +20,9 @@ output/
 _*.py
 _*.png
 _*.txt
+_*.md
+_*.ps1
+_*.webm
 # Scratch folders the test suites create. These hold fake checkpoints
 # of several hundred megabytes, and one of them was very nearly
 # committed.
