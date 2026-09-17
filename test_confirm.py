@@ -10,9 +10,11 @@ import shutil
 import time
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QApplication, QLabel, QPushButton,
+)
 
-from avcore.config import Settings
+from avcore.config import DEFAULTS, Settings
 from avcore.engine import Engine
 from avcore.images import ComfyBackend
 
@@ -307,6 +309,119 @@ check("something absent returns -1",
 
 engd.shutdown()
 shutil.rmtree(dev, ignore_errors=True)
+
+print("\n=== saved profiles ===")
+# A profile is somewhere to keep "how I like it for streaming", so the
+# alternative to twenty adjustments is one click.
+import avcore.profiles as profiles
+from avgui.dialogs import (
+    ConfirmProfile, ConfirmProfileDelete, ConfirmReset, NameProfile,
+)
+
+profiles.PROFILES_FILE = tmp / "profiles.json"
+
+sp = Settings.load(path=tmp / "profiles_settings.json")
+sp.set("comfyui.path", str(tmp / "SomeComfy"))
+sp.set("models.civitai_key", "a-secret")
+sp.set("image.width", 1920)
+sp.set("speech.min_words", 7)
+sp.save()
+
+profiles.save("Streaming", sp)
+check("it is listed", profiles.names() == ["Streaming"],
+      str(profiles.names()))
+
+print("\n  three things a profile refuses to carry:")
+stored = profiles._read()["Streaming"]
+check("not the API key", "models.civitai_key" not in stored,
+      "credentials should not ride along in a file people share")
+check("not where ComfyUI is", "comfyui.path" not in stored,
+      "that describes the machine, not a preference")
+check("not the folders",
+      not any(key.startswith("paths.") for key in stored))
+check("but the preferences are all there",
+      stored["image.width"] == 1920 and stored["speech.min_words"] == 7)
+
+print("\n  loading puts them back:")
+sp.set("image.width", 512)
+sp.set("speech.min_words", 2)
+sp.save()
+applied = profiles.apply("Streaming", sp)
+check("the settings return", sp.get("image.width") == 1920
+      and sp.get("speech.min_words") == 7)
+check("and it says how many", applied > 40, str(applied))
+check("the API key is left alone",
+      sp.get("models.civitai_key") == "a-secret",
+      "a profile that cleared it would be a nasty surprise")
+
+print("\n  a profile saved before a setting existed:")
+old_shape = profiles._read()
+old_shape["Sparse"] = {"image.width": 800}
+profiles._write(old_shape)
+sp.set("speech.min_words", 5)
+sp.save()
+profiles.apply("Sparse", sp)
+check("what it carries is applied", sp.get("image.width") == 800)
+check("what it never knew about is left alone",
+      sp.get("speech.min_words") == 5,
+      "reverting to a default it never stored would be wrong")
+
+print("\n  deleting:")
+check("it goes", profiles.delete("Sparse") and
+      "Sparse" not in profiles.names())
+check("deleting one that is not there is not an error",
+      profiles.delete("Sparse") is False)
+
+print("\n=== resetting to defaults ===")
+sr = Settings.load(path=tmp / "reset_settings.json")
+sr.set("comfyui.path", str(tmp / "KeepThis"))
+sr.set("image.width", 640)
+sr.set("ui.decor_theme", "cryptic")
+sr.set("paths.overlay_dir", str(tmp / "KeepThisToo"))
+sr.save()
+
+changed = profiles.reset_to_defaults(sr)
+check("settings go back to the defaults",
+      sr.get("image.width") == DEFAULTS["image"]["width"]
+      and sr.get("ui.decor_theme") == "none")
+check("and it says how many changed", changed >= 2, str(changed))
+check("where ComfyUI lives is kept",
+      sr.get("comfyui.path") == str(tmp / "KeepThis"),
+      "a reset that loses a 10 GB install is a bigger promise than the "
+      "button makes")
+check("and so are the folders",
+      sr.get("paths.overlay_dir") == str(tmp / "KeepThisToo"))
+
+print("\n  the dialogs say what will happen:")
+dlg = ConfirmReset()
+words = " ".join(l.text() for l in dlg.findChildren(QLabel))
+check("reset says images are safe", "images" in words and "kept" in words)
+check("reset suggests saving first", "profile first" in words)
+check("and keeping is the default",
+      {b.objectName(): b for b in dlg.findChildren(QPushButton)}
+      ["denyButton"].isDefault())
+dlg.reject()
+
+dlg = ConfirmProfile("Streaming")
+words = " ".join(l.text() for l in dlg.findChildren(QLabel))
+check("loading warns about unsaved settings", "will be lost" in words)
+check("and says what is not touched", "not affected" in words)
+dlg.reject()
+
+dlg = NameProfile(["Streaming"], "Streaming")
+check("naming an existing profile offers to replace",
+      dlg.go.text() == "Replace", dlg.go.text())
+dlg.name.setText("Something new")
+check("a new name saves", dlg.go.text() == "Save")
+dlg.name.setText("   ")
+check("an empty name cannot be saved", not dlg.go.isEnabled())
+dlg.reject()
+
+dlg = ConfirmProfileDelete("Streaming")
+words = " ".join(l.text() for l in dlg.findChildren(QLabel))
+check("deleting a profile says current settings stay",
+      "stay exactly as they are" in words)
+dlg.reject()
 
 bad = [n for n, ok in results if not ok]
 

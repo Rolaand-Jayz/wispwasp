@@ -449,3 +449,206 @@ class ConfirmPurge(QDialog):
         # The safe option has focus, so Enter cannot empty the gallery.
         deny.setDefault(True)
         deny.setFocus()
+
+
+class NameProfile(QDialog):
+    """
+    Asks what to call a profile, and warns before replacing one.
+
+    The warning matters: overwriting silently is how somebody loses the
+    setup they spent an evening getting right.
+    """
+
+    def __init__(self, existing, suggested="", parent=None):
+        super().__init__(parent)
+        self.existing = {name.lower() for name in existing}
+        self.setWindowTitle("Save settings profile")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 16)
+        outer.setSpacing(10)
+
+        title = QLabel("Save these settings as")
+        title.setObjectName("dialogTitle")
+        outer.addWidget(title)
+
+        self.name = QLineEdit(suggested)
+        self.name.setPlaceholderText("Streaming, Quiet room, Testing...")
+        self.name.textChanged.connect(self._sync)
+        outer.addWidget(self.name)
+
+        self.note = QLabel(
+            "Audio, speech, image and appearance settings are saved. "
+            "Folder locations and your API key are not.")
+        self.note.setObjectName("fieldLabel")
+        self.note.setWordWrap(True)
+        outer.addWidget(self.note)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("denyButton")
+        cancel.clicked.connect(self.reject)
+        row.addWidget(cancel)
+        self.go = QPushButton("Save")
+        self.go.setObjectName("confirmButton")
+        self.go.clicked.connect(self.accept)
+        row.addWidget(self.go)
+        outer.addLayout(row)
+
+        self.name.setFocus()
+        self._sync()
+
+    def _sync(self):
+        chosen = self.name.text().strip()
+        self.go.setEnabled(bool(chosen))
+        if chosen.lower() in self.existing:
+            self.go.setText("Replace")
+            self.note.setText(
+                f"A profile called {chosen} already exists. Saving will "
+                f"replace it.")
+        else:
+            self.go.setText("Save")
+            self.note.setText(
+                "Audio, speech, image and appearance settings are saved. "
+                "Folder locations and your API key are not.")
+
+    def chosen_name(self):
+        return self.name.text().strip()
+
+
+class ConfirmProfile(QDialog):
+    """Asks before replacing the current settings with a profile."""
+
+    def __init__(self, name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Load profile")
+        self.setModal(True)
+        self.setMinimumWidth(430)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 16)
+        outer.setSpacing(12)
+
+        title = QLabel(f"Load {name}?")
+        title.setObjectName("dialogTitle")
+        outer.addWidget(title)
+
+        body = QLabel(
+            "This replaces your current audio, speech, image and "
+            "appearance settings with the ones saved in this profile.\n\n"
+            "Anything you have not saved to a profile will be lost. Your "
+            "folders, models and images are not affected.")
+        body.setWordWrap(True)
+        body.setObjectName("fieldLabel")
+        outer.addWidget(body)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        deny = QPushButton("Cancel")
+        deny.setObjectName("denyButton")
+        deny.clicked.connect(self.reject)
+        row.addWidget(deny)
+        go = QPushButton(f"Load {name}")
+        go.setObjectName("confirmButton")
+        go.clicked.connect(self.accept)
+        row.addWidget(go)
+        outer.addLayout(row)
+        deny.setDefault(True)
+        deny.setFocus()
+
+
+class ConfirmReset(QDialog):
+    """
+    Asks before putting everything back to how it shipped.
+
+    Says what survives as well as what goes: the worry with a reset
+    button is usually "will I lose my pictures", and the answer is no.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Reset settings")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 16)
+        outer.setSpacing(12)
+
+        title = QLabel("Reset all settings to defaults?")
+        title.setObjectName("dialogTitle")
+        outer.addWidget(title)
+
+        body = QLabel(
+            "Every setting goes back to how the app ships: audio, "
+            "speech, image size, appearance, themes, all of it.\n\n"
+            "Your images, favourites, models and saved profiles are "
+            "kept, and so is where ComfyUI is installed. This cannot be "
+            "undone - if there is a setup you want to keep, save it as a "
+            "profile first.")
+        body.setWordWrap(True)
+        body.setObjectName("fieldLabel")
+        outer.addWidget(body)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        deny = QPushButton("Keep my settings")
+        deny.setObjectName("denyButton")
+        deny.clicked.connect(self.reject)
+        row.addWidget(deny)
+        go = QPushButton("Reset everything")
+        go.setObjectName("confirmButton")
+        go.clicked.connect(self.accept)
+        row.addWidget(go)
+        outer.addLayout(row)
+        deny.setDefault(True)
+        deny.setFocus()
+
+
+class ConfirmProfileDelete(QDialog):
+    """
+    Asks before removing a saved profile.
+
+    Its own dialog rather than the one used for images: that one shows
+    the picture being deleted, which is the whole point of it and
+    meaningless here.
+    """
+
+    def __init__(self, name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Delete profile")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 16)
+        outer.setSpacing(12)
+
+        title = QLabel(f"Delete the profile {name}?")
+        title.setObjectName("dialogTitle")
+        outer.addWidget(title)
+
+        body = QLabel(
+            "The saved settings in it are lost. Your current settings "
+            "stay exactly as they are - this only removes the saved "
+            "copy.")
+        body.setWordWrap(True)
+        body.setObjectName("fieldLabel")
+        outer.addWidget(body)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        deny = QPushButton("Keep it")
+        deny.setObjectName("denyButton")
+        deny.clicked.connect(self.reject)
+        row.addWidget(deny)
+        go = QPushButton("Delete")
+        go.setObjectName("confirmButton")
+        go.clicked.connect(self.accept)
+        row.addWidget(go)
+        outer.addLayout(row)
+        deny.setDefault(True)
+        deny.setFocus()

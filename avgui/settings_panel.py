@@ -341,6 +341,7 @@ class SettingsPanel(QWidget):
     # ---- sections ------------------------------------------------------
 
     def _audio_section(self):
+        self._profiles_section()
         self.form.addWidget(heading("Audio"))
         self.form.addWidget(hint(
             "Pick the output you want to listen in on. Leave it on the "
@@ -800,6 +801,186 @@ class SettingsPanel(QWidget):
         # Applied now that both halves exist, so a panel opened while
         # set to online does not start out showing them.
         self._sync_backend_rows()
+
+    def _profiles_section(self):
+        """
+        Saved sets of preferences, and the way back to the defaults.
+
+        At the top because it is the shortcut past everything below -
+        putting it at the bottom would mean scrolling past the forty
+        settings it exists to save you from.
+        """
+        self.form.addWidget(heading("Profiles"))
+        note = QLabel(
+            "Save the settings you like under a name and come back to "
+            "them later. Folder locations and your API key are not part "
+            "of a profile.")
+        note.setObjectName("fieldLabel")
+        note.setWordWrap(True)
+        self.form.addWidget(note)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        self.profile_pick = QComboBox()
+        self.profile_pick.setMinimumWidth(200)
+        self.profile_pick.currentIndexChanged.connect(
+            lambda _i: self._sync_profiles())
+        row.addWidget(self.profile_pick, 1)
+
+        self.profile_load = QPushButton("Load")
+        self.profile_load.clicked.connect(self._load_profile)
+        row.addWidget(self.profile_load)
+
+        save_btn = QPushButton("Save current as...")
+        save_btn.clicked.connect(self._save_profile)
+        row.addWidget(save_btn)
+
+        self.profile_delete = QPushButton("Delete")
+        self.profile_delete.setObjectName("denyButton")
+        self.profile_delete.clicked.connect(self._delete_profile)
+        row.addWidget(self.profile_delete)
+
+        self.form.addLayout(row)
+
+        reset_row = QHBoxLayout()
+        self.profile_note = QLabel("")
+        self.profile_note.setObjectName("fieldLabel")
+        self.profile_note.setWordWrap(True)
+        reset_row.addWidget(self.profile_note, 1)
+        reset_btn = QPushButton("Reset to defaults")
+        reset_btn.setObjectName("denyButton")
+        reset_btn.setToolTip(
+            "Put every setting back to how the app ships")
+        reset_btn.clicked.connect(self._reset_settings)
+        reset_row.addWidget(reset_btn)
+        self.form.addLayout(reset_row)
+
+        self._reload_profiles()
+
+    def _reload_profiles(self):
+        from avcore import profiles
+
+        self.profile_pick.blockSignals(True)
+        self.profile_pick.clear()
+        saved = profiles.names()
+        for name in saved:
+            self.profile_pick.addItem(name, name)
+        if not saved:
+            self.profile_pick.addItem("No profiles saved yet", "")
+        self.profile_pick.blockSignals(False)
+        self._sync_profiles()
+
+    def _sync_profiles(self):
+        has = bool(self.profile_pick.currentData())
+        self.profile_load.setEnabled(has)
+        self.profile_delete.setEnabled(has)
+
+    def _save_profile(self):
+        from avcore import profiles
+
+        from .dialogs import NameProfile
+
+        # Anything held back by the confirm bar is not in the settings
+        # yet, so saving now would quietly store the old values.
+        if self.is_dirty():
+            self.profile_note.setText(
+                "Apply or cancel your pending changes first - a profile "
+                "saves what is in effect, not what is waiting.")
+            return
+
+        dialog = NameProfile(profiles.names(),
+                             self.profile_pick.currentData() or "", self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        name = dialog.chosen_name()
+        try:
+            profiles.save(name, self.s)
+        except (OSError, ValueError) as exc:
+            self.profile_note.setText(f"Could not save: {exc}")
+            return
+        self._reload_profiles()
+        index = self.profile_pick.findData(name)
+        if index >= 0:
+            self.profile_pick.setCurrentIndex(index)
+        self.profile_note.setText(f"Saved {name}.")
+
+    def _load_profile(self):
+        from avcore import profiles
+
+        from .dialogs import ConfirmProfile
+
+        name = self.profile_pick.currentData()
+        if not name:
+            return
+        if ConfirmProfile(name, self).exec() != QDialog.Accepted:
+            return
+        try:
+            applied = profiles.apply(name, self.s)
+        except (KeyError, OSError) as exc:
+            self.profile_note.setText(f"Could not load {name}: {exc}")
+            return
+        self._adopt_settings()
+        self.profile_note.setText(
+            f"Loaded {name} - {applied} settings applied.")
+
+    def _delete_profile(self):
+        from avcore import profiles
+
+        from .dialogs import ConfirmProfileDelete
+
+        name = self.profile_pick.currentData()
+        if not name:
+            return
+        if ConfirmProfileDelete(name, self).exec() != QDialog.Accepted:
+            return
+        profiles.delete(name)
+        self._reload_profiles()
+        self.profile_note.setText(f"Deleted {name}.")
+
+    def _reset_settings(self):
+        from avcore import profiles
+
+        from .dialogs import ConfirmReset
+
+        if ConfirmReset(self).exec() != QDialog.Accepted:
+            return
+        changed = profiles.reset_to_defaults(self.s)
+        self._adopt_settings()
+        self.profile_note.setText(
+            f"Reset to defaults - {changed} settings changed."
+            if changed else "Everything was already at its default.")
+
+    def _adopt_settings(self):
+        """
+        Redraw every field from the settings, and drop pending edits.
+
+        Loading a profile or resetting changes the settings underneath
+        the panel, so anything the confirm bar was holding refers to a
+        world that no longer exists.
+        """
+        # _loading is what stops the field handlers recording these as
+        # edits; blocking signals per widget would miss the ones that
+        # react through other paths.
+        was, self._loading = self._loading, True
+        try:
+            for key in self._widgets:
+                restore = self._restorers.get(key)
+                if restore is not None:
+                    restore(self.s.get(key))
+        finally:
+            self._loading = was
+
+        self._pending.clear()
+        self.dirty_changed.emit(False)
+
+        # The same follow-ups cancelling makes: several controls grey
+        # themselves from the live values rather than from their own.
+        self._apply_mode()
+        self._check_suffix()
+        self._sync_backend_rows()
+        self._reload_models()
+        self._run_side_effects(set(self._widgets))
 
     def _reload_models(self):
         """

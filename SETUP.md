@@ -983,6 +983,37 @@ convention - is still outstanding.
 
 ---
 
+## Settings profiles
+
+A profile keeps a named set of preferences - *Streaming*, *Quiet room* -
+so the alternative to twenty adjustments is one click. They live in
+``profiles.json`` beside the settings.
+
+Three things are deliberately left out. **Where ComfyUI and the folders
+are**, because those describe the machine rather than a taste, and
+restoring a stale path would send the app looking for an install that is
+not there. **The Civitai API key**, because it is a credential and
+copying it between files that get shared or backed up is how credentials
+leak. **Which model tier was installed**, because that is a fact about
+the disk.
+
+Loading only touches the keys a profile actually carries, so one saved
+before a setting existed leaves that setting alone rather than reverting
+it to a default it never knew about.
+
+Saving is refused while the confirm bar is holding changes: a profile
+records what is in effect, and storing what is merely waiting would be
+quietly wrong.
+
+**Reset to defaults keeps the installation paths.** Every preference
+goes back to how the app ships, but not where ComfyUI lives - a reset
+that could lose track of a ten gigabyte install and start downloading it
+again is a far bigger consequence than that button promises. The
+confirmation says what survives as well as what goes, because the real
+worry with a reset button is usually "will I lose my pictures".
+
+---
+
 ## Releases and updating
 
 The version is written in `avcore/version.py` and nowhere else. The
