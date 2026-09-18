@@ -1132,6 +1132,27 @@ worry with a reset button is usually "will I lose my pictures".
 
 ## Releases and updating
 
+**Push before tagging.** A release creates its tag from whatever the
+branch head is at that moment. Publishing v0.1.7 before pushing the
+commit tagged it at the previous commit - the release carried none of
+the work it was named for, and the check that downloads and verifies it
+passed against something that later vanished. The order is: build, test,
+commit, push, confirm nothing is unpushed, then release.
+
+**A failed asset upload leaves a ghost.** Three attempts to upload
+``WispWasp-0.1.7.1-setup.exe`` returned HTTP 500 while the identical
+bytes went up cleanly under another name, which is what isolated it: the
+first failure left a record holding that filename, invisible to the API
+and untouched by ``--clobber``. Deleting the release and recreating it
+clears the records. If an upload 500s more than once on the same name,
+it is the name that is stuck, not the file.
+
+**Verify by downloading, not by reading the response.** The upload
+saying "uploaded" is GitHub's word for it. The check that matters is
+fetching the published manifest with no credentials, downloading the
+installer it points at, and comparing the SHA-256.
+
+
 The version is written in `avcore/version.py` and nowhere else. The
 window shows it in the corner, the installer takes it as a parameter,
 and `build.ps1` reads it to name the output. It used to live only in
