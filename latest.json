@@ -1,8 +1,8 @@
 {
-  "version": "0.1.7.1",
-  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.7.1/WispWasp-0.1.7.1-setup.exe",
+  "version": "0.1.8",
+  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.8/WispWasp-0.1.8-setup.exe",
   "page": "https://github.com/sucretown/wispwasp/releases/latest",
-  "sha256": "ddb5539906090de8a48cc286a9a96150a634ce9cdcdb1128d76c403ee23ba370",
-  "size": 82602033,
-  "notes": "Fixes the Install button for Animate images doing nothing when clicked."
+  "sha256": "4129cdb408a08bba6c83aee4bc403274f2d9d1d268ea505d836d3d1b87817acf",
+  "size": 82621381,
+  "notes": "Keyboard shortcuts, an About page, and download sizes that read correctly."
 }

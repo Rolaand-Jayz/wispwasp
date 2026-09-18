@@ -1213,6 +1213,51 @@ check("and asking again is still safe", quiet.play() is False)
 egg.deleteLater()
 quiet.deleteLater()
 
+print("\n=== keyboard shortcuts ===")
+
+
+def _editable_combo():
+    from PySide6.QtWidgets import QComboBox
+
+    box = QComboBox()
+    box.setEditable(True)
+    return box
+
+# Single keys on the two working pages. The awkward requirements are
+# the ones worth pinning: they must not fire while somebody is typing,
+# and they must not fire anywhere else in the app.
+from PySide6.QtCore import QEvent
+from PySide6.QtGui import QKeyEvent
+
+from avgui.hotkeys import ACTIONS, DEFAULTS, describes_typing, normalise
+
+check("every action has a default", len(DEFAULTS) == len(ACTIONS))
+check("and they are all different",
+      len(set(DEFAULTS.values())) == len(DEFAULTS),
+      "two actions on one key means one of them stops working")
+
+print("\n  keys are stored the way they will be compared:")
+check("a bare letter survives", normalise("R") == "R")
+check("lower case is lifted", normalise("r") == "R", normalise("r"))
+check("space is named", normalise("Space") == "Space")
+check("and nonsense becomes nothing", normalise("") == "",
+      "a blank binding simply turns the shortcut off")
+
+print("\n  what counts as typing:")
+from PySide6.QtWidgets import (
+    QComboBox, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox,
+)
+
+check("a line edit does", describes_typing(QLineEdit()))
+check("a prompt box does", describes_typing(QPlainTextEdit()))
+check("a number field does", describes_typing(QSpinBox()),
+      "pressing X in a spin box is still typing")
+check("an editable combo does",
+      describes_typing(_editable_combo()))
+check("a plain combo does not", not describes_typing(QComboBox()))
+check("and a button does not", not describes_typing(QPushButton()))
+check("nothing focused is not typing", not describes_typing(None))
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

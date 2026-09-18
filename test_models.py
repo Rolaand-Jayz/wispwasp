@@ -94,7 +94,7 @@ check("it returns models", len(found) == 3, str(len(found)))
 check("sizes are converted to bytes",
       found[0].size_bytes == 2_082_816 * 1024)
 check("and shown in a form a person can judge",
-      found[0].size_label == "2.0 GB", found[0].size_label)
+      found[0].size_label == "2.1 GB", found[0].size_label)
 check("html is stripped from descriptions",
       found[0].description == "A useful checkpoint.",
       found[0].description)
@@ -406,7 +406,8 @@ info = fake_search()[0]
 dialog = ConfirmDownload(info, folder)
 labels = " ".join(l.text() for l in dialog.findChildren(QLabel))
 buttons = {b.objectName(): b for b in dialog.findChildren(QPushButton)}
-check("the size, in the title of the button", "2.0 GB" in labels)
+# Same file, decimal units.
+check("the size, in the title of the button", "2.1 GB" in labels)
 check("where it is going", "checkpoints" in labels)
 check("the licence terms", "commercial use" in labels)
 check("that it can be resumed", "picked up again" in labels)
@@ -485,6 +486,51 @@ check("the installed tab's line survived",
 
 window.close()
 app.processEvents()
+
+print("\n=== progress survives a file bigger than 2 GB ===")
+# Qt's int is 32 bits. A worker declaring Signal(int, int) wrapped any
+# size over 2,147,483,647: a 4.27GB download arrived as -29,870,600 and
+# the bar read "0.14 of -0.03 GB". Worse, the larger models wrapped to
+# believable numbers - 9.6GB came through as 5.3GB, which nobody would
+# think to report.
+from PySide6.QtCore import QObject, Signal
+
+from avgui.model_browser import DownloadWorker
+from avgui.setup_panel import ModelFetch
+
+LIMIT = 2 ** 31 - 1
+
+
+def _carries(worker, value):
+    """What a size looks like after a trip through the signal."""
+    seen = []
+    worker.progress.connect(lambda done, total: seen.append(total))
+    worker.progress.emit(0, value)
+    app.processEvents()
+    return seen[-1] if seen else None
+
+
+_dummy = ModelInfo(name="x", description="", base_model="", nsfw=False,
+                   file_name="x", size_bytes=1, download_url="")
+for name, worker in (("the model browser",
+                      DownloadWorker(_dummy, tmp, None)),
+                     ("the setup fetcher",
+                      ModelFetch(Settings.load(path=tmp / "wrap.json")))):
+    for label, size in (("a 4.27 GB model", 4_265_096_696),
+                        ("the 9.6 GB video model", 9_559_625_980),
+                        ("a 2 GB model", 2_000_000_000)):
+        carried = _carries(worker, size)
+        check(f"{name} carries {label} intact",
+              carried == size,
+              f"{carried:,} instead of {size:,}"
+              if carried != size else f"{size:,}")
+
+check("the wrap this replaces produced a negative",
+      4_265_096_696 - 2 ** 32 < 0,
+      "which is what showed as -0.03 GB")
+check("and sizes under the limit were never affected",
+      2_000_000_000 < LIMIT,
+      "which is why small models looked fine and nobody noticed")
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

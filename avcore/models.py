@@ -70,10 +70,11 @@ class ModelInfo:
         """A size a person can judge, not a number of bytes."""
         if not self.size_bytes:
             return "size unknown"
-        gb = self.size_bytes / 1_073_741_824
+        # Decimal, so this agrees with the catalogue page it came from.
+        gb = self.size_bytes / 1_000_000_000
         if gb >= 1:
             return f"{gb:.1f} GB"
-        return f"{self.size_bytes / 1_048_576:.0f} MB"
+        return f"{self.size_bytes / 1_000_000:.0f} MB"
 
 
 def _strip_html(text):

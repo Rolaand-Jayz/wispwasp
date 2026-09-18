@@ -39,7 +39,7 @@ COMFY_ASSET = "ComfyUI_windows_portable_nvidia.7z"
 TIERS = {
     "sd15": {
         "label": "Stable Diffusion 1.5",
-        "note": "About 4 GB. Faster, lighter on the graphics card, and "
+        "note": "About 4.3 GB. Faster, lighter on the graphics card, and "
                 "fine for most things.",
         "name": "v1-5-pruned-emaonly.safetensors",
         "url": ("https://huggingface.co/stable-diffusion-v1-5"
@@ -50,7 +50,7 @@ TIERS = {
     },
     "sdxl": {
         "label": "Stable Diffusion XL",
-        "note": "About 6.5 GB. Better images, slower, and wants more "
+        "note": "About 6.9 GB. Better images, slower, and wants more "
                 "video memory.",
         "name": "sd_xl_base_1.0.safetensors",
         "url": ("https://huggingface.co/stabilityai"
@@ -69,7 +69,7 @@ DEFAULT_TIER = "sdxl"
 # hidden until somebody asks for it.
 VIDEO_MODEL = {
     "label": "Animate images (video)",
-    "note": "About 8.9 GB. Turns a gallery picture into a short clip. "
+    "note": "About 9.6 GB. Turns a gallery picture into a short clip. "
             "Needs an NVIDIA card with 12 GB or more.",
     "name": "svd_xt.safetensors",
     "url": ("https://huggingface.co/stabilityai"
@@ -371,11 +371,28 @@ def check(settings):
 
 
 def human(n):
+    """
+    A size, in the units the rest of the world uses.
+
+    Decimal, not binary. HuggingFace, Civitai and every download page
+    count a gigabyte as 1000^3, so dividing by 1024^3 and writing "GB"
+    made a 6.9 GB checkpoint appear as 6.5 GB and a 9.6 GB model as 8.9.
+    Nothing was miscounted; the label was the wrong unit, which is worse
+    than a rounding error because it looks like the app disagreeing with
+    the page it is downloading from.
+    """
+    step = 1000.0
     for unit in ("B", "KB", "MB", "GB"):
-        if abs(n) < 1024 or unit == "GB":
+        if abs(n) < step or unit == "GB":
             return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
-        n /= 1024
+        n /= step
     return f"{n:.1f} GB"
+
+
+# One gigabyte, as a download page means it. Used wherever a size is
+# shown to somebody, so the app and the source they got the file from
+# agree with each other.
+GB = 1_000_000_000
 
 
 class SetupCancelled(Exception):

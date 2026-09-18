@@ -473,7 +473,9 @@ check("with its version", found["version"] == "9.9.9")
 check("and where to get it", found["page"] == "https://example/releases")
 check("described for a person",
        "9.9.9 is available" in describe(found), describe(found))
-check("including the size", "79 MB" in describe(found), describe(found))
+# Decimal megabytes now, like every download page - so the number
+# moved even though the file did not.
+check("including the size", "82 MB" in describe(found), describe(found))
 
 same = {"version": __version__, "page": "https://example/releases"}
 check("the current version is not offered as an update",
@@ -749,6 +751,51 @@ check("nothing was fetched after declining",
 
 engv.shutdown()
 panelv.deleteLater()
+
+print("\n=== sizes are shown in the units people expect ===")
+# Nothing was ever miscounted. The app divided by 1024^3 and wrote "GB",
+# while HuggingFace, Civitai and every download page count 1000^3 - so a
+# 6.9 GB checkpoint appeared as 6.5 GB and a 9.6 GB model as 8.9. That
+# reads as the app disagreeing with the page it is downloading from,
+# which is worse than a rounding error.
+from avcore.models import ModelInfo
+from avcore.setup import VIDEO_MODEL, human
+from avgui.model_browser import _size
+
+
+def _catalogue(size):
+    return ModelInfo(name="x", description="", base_model="", nsfw=False,
+                     file_name="x", size_bytes=size,
+                     download_url="").size_label
+
+
+check("a 6.9 GB checkpoint reads as 6.9 GB",
+      human(6_938_078_334).startswith("6.9"),
+      human(6_938_078_334))
+check("the video model reads as 9.6 GB",
+      human(9_559_625_980).startswith("9.6"),
+      human(9_559_625_980))
+check("and not as 8.9, which is the same file in binary units",
+      not human(9_559_625_980).startswith("8.9"))
+
+print("\n  every place that shows a size agrees:")
+for size in (9_559_625_980, 6_938_078_334, 4_265_146_304, 500_000_000):
+    # Rounded to one decimal before comparing: the browser shows two,
+    # which is a difference in precision rather than in units.
+    shown = {round(float(text.split()[0]), 1)
+             for text in (human(size), _size(size), _catalogue(size))}
+    check(f"{size:,} bytes reads the same everywhere",
+          max(shown) - min(shown) < 0.06,
+          f"{human(size)} / {_size(size)} / {_catalogue(size)}")
+
+print("\n  and the notes quote the same numbers:")
+check("the video note matches its size",
+      human(VIDEO_MODEL["bytes"])[:3] in VIDEO_MODEL["note"],
+      VIDEO_MODEL["note"][:40])
+for _key, _spec in TIERS.items():
+    check(f"the {_spec['label']} note matches its size",
+          human(_spec["bytes"])[:3] in _spec["note"],
+          _spec["note"][:40])
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

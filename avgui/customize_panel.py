@@ -7,7 +7,7 @@ different frame of mind.
 """
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QKeySequence, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QFrame, QHBoxLayout,
     QLabel, QListWidget,
@@ -66,6 +66,77 @@ class Swatch(QFrame):
             self.picked.emit(self._colour)
 
 
+class KeyCatcher(QPushButton):
+    """
+    Shows a shortcut, and records a new one when clicked.
+
+    Listening rather than typing: asking somebody to write "Space" is
+    asking them to know what Qt calls the key they just pressed. Click,
+    press, done.
+    """
+
+    captured = Signal(str)
+
+    def __init__(self, key="", parent=None):
+        super().__init__(parent)
+        self._key = key
+        self._listening = False
+        self.setCheckable(True)
+        self.clicked.connect(self._start)
+        self._show()
+
+    def key(self):
+        return self._key
+
+    def set_key(self, key):
+        self._key = key or ""
+        self._show()
+
+    def _show(self):
+        if self._listening:
+            self.setText("press a key...")
+        else:
+            self.setText(self._key or "none")
+
+    def _start(self):
+        self._listening = True
+        self.setChecked(True)
+        self.grabKeyboard()
+        self._show()
+
+    def _stop(self):
+        self._listening = False
+        self.setChecked(False)
+        self.releaseKeyboard()
+        self._show()
+
+    def keyPressEvent(self, event):
+        if not self._listening:
+            super().keyPressEvent(event)
+            return
+
+        key = event.key()
+        if key in (Qt.Key_Escape,):
+            # Escape means "changed my mind", not "bind Escape".
+            self._stop()
+            return
+        if key in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta):
+            return          # a modifier on its own is not a shortcut
+
+        from .hotkeys import normalise
+
+        chosen = normalise(QKeySequence(key).toString())
+        self._stop()
+        if chosen:
+            self._key = chosen
+            self._show()
+            self.captured.emit(chosen)
+
+    def focusOutEvent(self, event):
+        if self._listening:
+            self._stop()
+        super().focusOutEvent(event)
+
 class CustomizePanel(QWidget):
     """
     Colours now; presets and decorative themes are marked out for later.
@@ -99,6 +170,7 @@ class CustomizePanel(QWidget):
         outer.addWidget(scroll, 1)
 
         self._colour_section()
+        self._hotkey_section()
         self._decor_section()
         self._styles_section()
         self.form.addStretch(1)
@@ -163,6 +235,114 @@ class CustomizePanel(QWidget):
             lambda: self._use_preset(theme.DEFAULT_MAIN,
                                      theme.DEFAULT_ACCENT))
         self.form.addWidget(reset, 0, Qt.AlignLeft)
+
+    def _hotkey_section(self):
+        """
+        One row per action, each showing the key it answers to.
+
+        Here rather than in Settings proper because this is decoration
+        of a sort - how the app is driven rather than what it does - and
+        because Settings holds its changes until Apply, while a shortcut
+        is easier to judge by trying it straight away.
+        """
+        from avgui.hotkeys import ACTIONS
+
+        self.form.addWidget(self._heading("Shortcuts"))
+        self.form.addWidget(self._hint(
+            "Single keys, while the Live or Prompt page is showing. They "
+            "do nothing while you are typing into a box, so you can "
+            "still write a prompt containing the letter C."))
+
+        self.key_buttons = {}
+        for name, label, _default in ACTIONS:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+
+            caption = QLabel(label)
+            caption.setMinimumWidth(190)
+            row.addWidget(caption)
+
+            catcher = KeyCatcher(self._current_key(name))
+            catcher.setMinimumWidth(110)
+            catcher.captured.connect(
+                lambda key, which=name: self._set_key(which, key))
+            row.addWidget(catcher)
+
+            clear = QPushButton("None")
+            clear.setToolTip("Turn this shortcut off")
+            clear.clicked.connect(
+                lambda _checked=False, which=name: self._set_key(which, ""))
+            row.addWidget(clear)
+            row.addStretch(1)
+
+            self.key_buttons[name] = catcher
+            self.form.addLayout(row)
+
+        self.key_note = QLabel("")
+        self.key_note.setObjectName("fieldLabel")
+        self.key_note.setWordWrap(True)
+        self.form.addWidget(self.key_note)
+
+        reset = QPushButton("Reset shortcuts")
+        reset.clicked.connect(self._reset_keys)
+        holder = QHBoxLayout()
+        holder.addWidget(reset)
+        holder.addStretch(1)
+        self.form.addLayout(holder)
+
+    def _current_key(self, name):
+        from avgui.hotkeys import DEFAULTS, normalise
+
+        stored = self.engine.s.get(f"hotkeys.{name}")
+        if stored is None:
+            stored = DEFAULTS.get(name, "")
+        return normalise(stored)
+
+    def _set_key(self, name, key):
+        """
+        Bind a key, refusing one that is already taken.
+
+        Refusing rather than silently stealing it: two actions on one
+        key means one of them stops working, and finding out which by
+        experiment is nobody's idea of a good time.
+        """
+        from avgui.hotkeys import ACTIONS, normalise
+
+        key = normalise(key)
+        if key:
+            for other, label, _default in ACTIONS:
+                if other != name and self._current_key(other) == key:
+                    self.key_note.setText(
+                        f"{key} is already used for \"{label}\". Give "
+                        f"that one a different key first.")
+                    self.key_buttons[name].set_key(self._current_key(name))
+                    return
+
+        self.engine.s.set(f"hotkeys.{name}", key)
+        self.engine.s.save()
+        self.key_buttons[name].set_key(key)
+        self.key_note.setText(
+            f"Shortcut set to {key}." if key
+            else "That shortcut is off.")
+        self._tell_window()
+
+    def _reset_keys(self):
+        from avgui.hotkeys import DEFAULTS
+
+        for name, default in DEFAULTS.items():
+            self.engine.s.set(f"hotkeys.{name}", default)
+            if name in self.key_buttons:
+                self.key_buttons[name].set_key(default)
+        self.engine.s.save()
+        self.key_note.setText("Back to the original keys.")
+        self._tell_window()
+
+    def _tell_window(self):
+        """The window holds the only copy that matters; it re-reads."""
+        window = self.window()
+        hotkeys = getattr(window, "hotkeys", None)
+        if hotkeys is not None:
+            hotkeys.reload()
 
     def _colour_row(self, label, swatch, description):
         row = QHBoxLayout()

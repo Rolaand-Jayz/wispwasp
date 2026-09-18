@@ -101,7 +101,11 @@ class ModelFetch(QThread):
     and an afternoon.
     """
 
-    progress = Signal(int, int)
+    # 64-bit for the same reason as the model browser's worker: Qt's int
+    # is 32 bits, and the video model is 9.6GB. Through a narrow signal
+    # that arrives as 5.3GB - wrong, but believable enough to go
+    # unreported.
+    progress = Signal("qint64", "qint64")
     done = Signal(str)          # empty when it worked
 
     def __init__(self, settings, parent=None):
@@ -504,7 +508,7 @@ class SetupPanel(QWidget):
         self.video_btn.style().unpolish(self.video_btn)
         self.video_btn.style().polish(self.video_btn)
 
-        size = VIDEO_MODEL["bytes"] / 1_073_741_824
+        size = VIDEO_MODEL["bytes"] / 1_000_000_000
         self.video_note.setText(
             "      " + VIDEO_MODEL["note"]
             + ("   Installed." if have
@@ -521,7 +525,7 @@ class SetupPanel(QWidget):
 
         if video_installed(self.s):
             path = video_file(self.s)
-            size = f"{path.stat().st_size / 1_073_741_824:.1f} GB"
+            size = f"{path.stat().st_size / 1_000_000_000:.1f} GB"
             if ConfirmUninstall(VIDEO_MODEL["label"], size, False,
                                 self).exec() != QDialog.Accepted:
                 return
@@ -536,7 +540,7 @@ class SetupPanel(QWidget):
             self.refresh()
             return
 
-        size = f"{VIDEO_MODEL['bytes'] / 1_073_741_824:.1f} GB"
+        size = f"{VIDEO_MODEL['bytes'] / 1_000_000_000:.1f} GB"
         if ConfirmInstall(VIDEO_MODEL["label"], size,
                           video_file(self.s).parent,
                           self).exec() != QDialog.Accepted:
@@ -555,8 +559,8 @@ class SetupPanel(QWidget):
         if total:
             self.video_bar.setValue(int(done * 100 / total))
             self.video_bar.setFormat(
-                f"%p%   {done / 1_073_741_824:.1f} of "
-                f"{total / 1_073_741_824:.1f} GB")
+                f"%p%   {done / 1_000_000_000:.1f} of "
+                f"{total / 1_000_000_000:.1f} GB")
 
     def _video_done(self, message):
         self.video_bar.hide()
@@ -613,7 +617,7 @@ class SetupPanel(QWidget):
             row["use"].setEnabled(have and not in_use)
             row["use"].setText("In use" if in_use else "Use")
 
-            size = f"{spec['bytes'] / 1_073_741_824:.1f} GB"
+            size = f"{spec['bytes'] / 1_000_000_000:.1f} GB"
             if ours:
                 detail = "   Installed."
             elif have:
@@ -809,7 +813,7 @@ class SetupPanel(QWidget):
             self._uninstall_tier(key)
             return
 
-        size = f"{spec['bytes'] / 1_073_741_824:.1f} GB"
+        size = f"{spec['bytes'] / 1_000_000_000:.1f} GB"
         where = tier_file(key, self.s).parent
         if ConfirmInstall(spec["label"], size, where,
                           self).exec() != QDialog.Accepted:
@@ -827,7 +831,7 @@ class SetupPanel(QWidget):
 
         spec = TIERS[key]
         path = tier_file(key, self.s)
-        size = f"{path.stat().st_size / 1_073_741_824:.1f} GB"
+        size = f"{path.stat().st_size / 1_000_000_000:.1f} GB"
         in_use = (self.s.get("comfyui.checkpoint") or "") == spec["name"]
 
         if ConfirmUninstall(spec["label"], size, in_use,

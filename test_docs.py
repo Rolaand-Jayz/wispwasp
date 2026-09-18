@@ -257,6 +257,38 @@ check("nothing imports a name its module does not have",
       not _broken,
       "; ".join(_broken) if _broken else "all of them resolve")
 
+print("\n=== the About page ===")
+# Four questions get somebody to this page: which version am I on, what
+# changed, something is broken and where do I say so, and where did my
+# files go. It answers those and stops.
+from avcore.version import (
+    AUTHOR, CHANGES, ISSUES_PAGE, RELEASES_PAGE, SOURCE_PAGE, __version__,
+)
+
+check("the author is credited", AUTHOR == "Cinnamoroll", AUTHOR)
+check("there is a list of what changed", len(CHANGES) >= 2,
+      f"{len(CHANGES)} entries")
+check("written for a person, not a commit log",
+      all(len(line) > 20 for line in CHANGES),
+      "one-word entries tell nobody anything")
+
+print("\n  the links go where they say:")
+check("bug reports go to the issue tracker",
+      ISSUES_PAGE == "https://github.com/sucretown/wispwasp/issues",
+      ISSUES_PAGE)
+check("the source link goes to the repository",
+      SOURCE_PAGE.endswith("/sucretown/wispwasp"), SOURCE_PAGE)
+check("and releases to the latest release",
+      RELEASES_PAGE.endswith("/releases/latest"), RELEASES_PAGE)
+check("every link is https",
+      all(url.startswith("https://")
+          for url in (ISSUES_PAGE, SOURCE_PAGE, RELEASES_PAGE)))
+
+print("\n  what the notes say matches this version:")
+check("the changes mention the newest feature",
+      any("shortcut" in line.lower() for line in CHANGES),
+      "the page claims to describe this version")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

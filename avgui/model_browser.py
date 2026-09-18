@@ -30,11 +30,13 @@ def _size(byte_count):
     part files all reading "0.00 GB" tells you nothing about which one
     is worth clearing.
     """
-    if byte_count >= 1_073_741_824:
-        return f"{byte_count / 1_073_741_824:.2f} GB"
-    if byte_count >= 1_048_576:
-        return f"{byte_count / 1_048_576:.0f} MB"
-    return f"{byte_count / 1024:.0f} KB"
+    # Decimal, like the page the file came from. See human() in
+    # avcore.setup for why this matters more than the rounding suggests.
+    if byte_count >= 1_000_000_000:
+        return f"{byte_count / 1_000_000_000:.2f} GB"
+    if byte_count >= 1_000_000:
+        return f"{byte_count / 1_000_000:.0f} MB"
+    return f"{byte_count / 1000:.0f} KB"
 
 
 class SearchWorker(QThread):
@@ -71,7 +73,12 @@ class DownloadWorker(QThread):
     file, and asking for the same model again carries on from there.
     """
 
-    progress = Signal(int, int)
+    # 64-bit, not Signal(int, int). Qt's int is 32 bits, so any file over
+    # 2.1GB wrapped: a 4.27GB download arrived as -29,870,600 and the bar
+    # read "0.14 of -0.03 GB". The larger models were worse, wrapping to
+    # plausible-looking numbers rather than obviously wrong ones - 9.6GB
+    # came through as 5.3GB, which nobody would question.
+    progress = Signal("qint64", "qint64")
     done = Signal(object)
     failed = Signal(str)
 
@@ -654,8 +661,8 @@ class ModelBrowser(QDialog):
             self.bar.setValue(int(done * 100 / total))
             # Bytes mean nothing at this scale; gigabytes do.
             self.bar.setFormat(
-                f"%p%   {done / 1_073_741_824:.2f} of "
-                f"{total / 1_073_741_824:.2f} GB")
+                f"%p%   {done / 1_000_000_000:.2f} of "
+                f"{total / 1_000_000_000:.2f} GB")
 
     def _arrived(self, info, path):
         self.bar.hide()

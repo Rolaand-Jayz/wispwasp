@@ -21,6 +21,7 @@ from avcore.version import __version__
 from . import theme
 from .assets import asset, load_pixmap
 from .bridge import EngineBridge
+from .about_panel import AboutPanel
 from .customize_panel import CustomizePanel
 from .quick_settings import QuickSettings
 from .version_label import VersionLabel
@@ -89,16 +90,19 @@ class MainWindow(QMainWindow):
             engine, on_layout_change=self.set_layout)
         self.customize = CustomizePanel(engine)
         self.customize.palette_changed.connect(self._repaint_theme)
+        self.about = AboutPanel(engine)
         self._panels = {
             "live": self.live, "prompt": self.prompt,
             "gallery": self.gallery, "setup": self.setup,
             "settings": self.settings, "customize": self.customize,
+            "about": self.about,
         }
 
         self.layout_name = None
         self._splitter_sizes = None
         self.set_layout(engine.s.get("ui.layout", "hybrid"), save=False)
         self._wire_quick()
+        self._wire_hotkeys()
         self._restore_geometry()
 
         # Overlays live on the window, so they float above whatever is
@@ -217,6 +221,8 @@ class MainWindow(QMainWindow):
             if key == "settings":
                 self.stack.addWidget(self._panels["customize"])
                 self._page_keys.append("customize")
+                self.stack.addWidget(self._panels["about"])
+                self._page_keys.append("about")
 
         row.addWidget(self.stack, 1)
         return root
@@ -312,6 +318,14 @@ class MainWindow(QMainWindow):
                 self.customize_nav.clicked.connect(
                     lambda: self.show_panel("customize"))
                 col.addWidget(self.customize_nav)
+
+                # About keeps Customize company rather than taking a
+                # place in the main list: it belongs to Settings, and it
+                # is not somewhere anybody goes twice in a session.
+                self.about_nav = SubNavItem("About")
+                self.about_nav.clicked.connect(
+                    lambda: self.show_panel("about"))
+                col.addWidget(self.about_nav)
 
         # The quick settings themselves now sit above the prompt boxes,
         # where the eye already is when deciding what to make. Only the
@@ -457,6 +471,39 @@ class MainWindow(QMainWindow):
             self._lift_viewer()
 
     # ---- navigation ----------------------------------------------------
+
+    def current_panel(self):
+        """Which page is showing, by name."""
+        index = self.stack.currentIndex()
+        if 0 <= index < len(self._page_keys):
+            return self._page_keys[index]
+        return ""
+
+    def _wire_hotkeys(self):
+        """
+        Install the shortcuts, and say what each one does.
+
+        The handlers are looked up through the live panel rather than
+        held directly, because a layout change rebuilds the panels and a
+        captured reference would point at a widget that is no longer on
+        screen.
+        """
+        from .hotkeys import Hotkeys
+
+        self.hotkeys = Hotkeys(self, self.engine.s)
+        self.hotkeys.bind("listen", self._hotkey_listen)
+        self.hotkeys.bind("capture", lambda: self.engine.capture_now())
+        self.hotkeys.bind("repeat", lambda: self.engine.repeat_last())
+        self.hotkeys.bind("cancel", lambda: self.engine.cancel_current())
+        self.hotkeys.bind("clear", lambda: self.engine.clear_overlay())
+        QApplication.instance().installEventFilter(self.hotkeys)
+
+    def _hotkey_listen(self):
+        """Start or stop listening, whichever applies."""
+        live = getattr(self, "live", None)
+        toggle = getattr(live, "_toggle_listen", None)
+        if toggle is not None:
+            toggle()
 
     def show_panel(self, key):
         """Switch views by name. Also used by the --panel dev flag."""
@@ -609,14 +656,21 @@ class MainWindow(QMainWindow):
         nav = getattr(self, "customize_nav", None)
         if nav is None:
             return
-        inside = key in ("settings", "customize")
+        inside = key in ("settings", "customize", "about")
+        about = getattr(self, "about_nav", None)
         if inside:
             nav.reveal()
+            if about is not None:
+                about.reveal()
         else:
             nav.conceal()
+            if about is not None:
+                about.conceal()
         nav.set_checked(key == "customize")
-        # The parent entry stays marked while its sub-page is open.
-        if key == "customize" and "settings" in self._page_keys:
+        if about is not None:
+            about.set_checked(key == "about")
+        # The parent entry stays marked while either sub-page is open.
+        if key in ("customize", "about") and "settings" in self._page_keys:
             parent = self.nav_group.button(
                 self._page_keys.index("settings"))
             if parent:

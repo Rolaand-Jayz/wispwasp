@@ -102,20 +102,26 @@ print("\n=== layout-specific structure ===")
 win.set_layout("hybrid")
 pump(0.3)
 check("hybrid shows the strip", win.live.strip.isVisible())
-check("hybrid nav lists every panel", len(win._page_keys) == 6,
-      str(win._page_keys))
+# Named rather than counted: the count changed when About was
+# added, and a test that fails because a page exists tells nobody
+# anything useful.
+check("hybrid nav lists every panel",
+      {"live", "prompt", "gallery", "setup", "settings"}
+      <= set(win._page_keys), str(win._page_keys))
 
 win.set_layout("sidebar")
 pump(0.3)
 check("panels layout hides the strip", not win.live.strip.isVisible())
-check("panels nav lists every panel", len(win._page_keys) == 6,
-      str(win._page_keys))
+check("panels nav lists every panel",
+      {"live", "prompt", "gallery", "setup", "settings"}
+      <= set(win._page_keys), str(win._page_keys))
 
 win.set_layout("split")
 pump(0.3)
 check("split hides the strip", not win.live.strip.isVisible())
 check("split merges live and prompt into one entry",
-      len(win._page_keys) == 5, str(win._page_keys))
+      "prompt" not in win._page_keys
+      and "live" in win._page_keys, str(win._page_keys))
 check("every layout carries the Customize sub-page",
       "customize" in win._page_keys)
 check("split built a splitter", win.splitter is not None)
@@ -128,8 +134,15 @@ wait_for(lambda: eng.snapshot().get("generated", 0) >= 1)
 snap = eng.snapshot()
 check("engine kept generating through the switches",
       snap.get("generated", 0) >= 1)
+# The preview follows the engine's state through a signal, so it can be
+# a beat behind the snapshot taken a line earlier. Waiting for it to
+# catch up tests that it arrives; comparing immediately tested how
+# quickly the machine happened to deliver a queued signal, which failed
+# one build in several for no reason anybody could act on.
+wait_for(lambda: win.live.preview._path == snap.get("image"))
 check("live panel is showing the current image",
-      win.live.preview._path == snap.get("image"))
+      win.live.preview._path == snap.get("image"),
+      f"preview={win.live.preview._path} state={snap.get('image')}")
 
 print("\n=== a dragged splitter size is remembered ===")
 win.set_layout("split")

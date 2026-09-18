@@ -81,5 +81,5 @@ def describe(found):
     size = found.get("size") or 0
     if size:
         return (f"Version {found['version']} is available "
-                f"({size / 1_048_576:.0f} MB). You have {running}.")
+                f"({size / 1_000_000:.0f} MB). You have {running}.")
     return f"Version {found['version']} is available. You have {running}."

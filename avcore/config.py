@@ -131,6 +131,15 @@ DEFAULTS = {
         # so an existing install keeps behaving as it did.
         "tier": "",
     },
+    "hotkeys": {
+        # Single keys, acted on while the Live or Prompt page is showing
+        # and nothing is being typed into. Blank disables one.
+        "listen": "Space",
+        "capture": "V",
+        "repeat": "R",
+        "cancel": "C",
+        "clear": "X",
+    },
 }
 
 

@@ -983,6 +983,47 @@ convention - is still outstanding.
 
 ---
 
+## Keyboard shortcuts
+
+Single keys on the Live and Prompt pages, changed under Settings then
+Customize. Space starts and stops listening, V captures, R repeats, C
+cancels, X clears the overlay.
+
+Three rules make them safe to have at all. They fire only on those two
+pages, because the gallery has its own keys and the other pages are full
+of fields. They never fire while somebody is typing - checked by
+behaviour rather than by widget name, since pressing X in a spin box is
+still typing. And a modified press is left alone, so Ctrl+C stays copy
+whatever C is bound to.
+
+Binding a key that is already taken is refused, naming the action that
+holds it. Two actions on one key means one of them quietly stops
+working, and finding out which by experiment is nobody's idea of a good
+time.
+
+These are window shortcuts, not global hotkeys: they only work when the
+app has focus. Intercepting keys from the rest of the machine would be
+overreach, particularly on a computer that is also driving OBS.
+
+## Sizes, and a 32-bit signal
+
+Two separate faults made download progress lie, and neither was a
+counting error.
+
+The first was units. The app divided by 1024^3 and wrote "GB", while
+HuggingFace, Civitai and every download page count 1000^3 - so a 6.9 GB
+checkpoint appeared as 6.5 GB. That reads as the app disagreeing with
+the page the file came from, which is worse than a rounding error
+because there is no way to tell which is lying.
+
+The second was worse. The download workers declared
+``progress = Signal(int, int)``, and Qt's ``int`` is 32 bits, so any
+file over 2,147,483,647 bytes wrapped: a 4.27 GB model arrived as
+-29,870,600 and the bar read "0.14 of -0.03 GB". The dangerous part was
+not the negative. A 9.6 GB model wrapped to 5.3 GB - wrong, but
+plausible enough that nobody would ever report it. Both signals are
+``qint64`` now.
+
 ## Animating a still
 
 An extra rather than part of the app: another 8.9GB and a card that can
