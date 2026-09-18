@@ -423,6 +423,46 @@ check("deleting a profile says current settings stay",
       "stay exactly as they are" in words)
 dlg.reject()
 
+print("\n=== safe mode is visible in the Avoid row ===")
+# The safety terms are added at generation rather than written into the
+# field, so that turning safe mode off returns exactly the wording
+# somebody chose. Right, and completely invisible - which was reported
+# as the tick doing nothing at all.
+from avcore.safety import NEGATIVE_TERMS
+
+check("there is a note under the Avoid row",
+      hasattr(panel, "avoid_note"))
+
+s.set("safety.safe_mode", False)
+panel._sync_avoid_note()
+check("nothing is said while it is off",
+      panel.avoid_note.text() == "")
+
+s.set("safety.safe_mode", True)
+panel._sync_avoid_note()
+check("and the terms are listed while it is on",
+      NEGATIVE_TERMS in panel.avoid_note.text(),
+      panel.avoid_note.text()[:50])
+check("said as an addition, not as a change to the field",
+      "also avoids" in panel.avoid_note.text())
+
+_field = panel._widgets["image.negative_prompt"]
+check("the field itself is never edited",
+      _field.text() == s.get("image.negative_prompt"),
+      "unticking must give back what was typed, unaltered")
+
+print("\n  it follows Apply rather than the tick:")
+import inspect as _inspect
+
+_effects = _inspect.getsource(panel.__class__._run_side_effects)
+check("the note is refreshed when settings land",
+      "_sync_avoid_note" in _effects,
+      "the tick is held by the confirm bar, so following the tick "
+      "would show the note before the setting existed")
+
+s.set("safety.safe_mode", False)
+panel._sync_avoid_note()
+
 bad = [n for n, ok in results if not ok]
 
 

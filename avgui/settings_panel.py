@@ -206,6 +206,11 @@ class SettingsPanel(QWidget):
     def _run_side_effects(self, keys):
         """Things that have to happen when particular settings land."""
         keys = set(keys)
+        # The tick is held by the confirm bar like any other change, so
+        # the note cannot follow the tick itself - it has to follow the
+        # setting landing. Without this, ticking and pressing Apply
+        # changed the behaviour and showed nothing at all.
+        self._sync_avoid_note()
         if any(k.startswith("audio.") for k in keys):
             reload_audio = getattr(self.engine, "reload_audio", None)
             if reload_audio:
@@ -706,6 +711,16 @@ class SettingsPanel(QWidget):
         self.suffix.textChanged.connect(self._check_suffix)
         rows.addRow("Style", self.suffix)
         rows.addRow("Avoid", self._bind_text("image.negative_prompt"))
+
+        # The safety terms are added when a picture is generated, not
+        # written into the field, so that turning safe mode off gives
+        # back exactly the wording somebody chose. That is the right
+        # behaviour and completely invisible, which is its own fault -
+        # this line says what is actually being sent.
+        self.avoid_note = QLabel("")
+        self.avoid_note.setObjectName("fieldLabel")
+        self.avoid_note.setWordWrap(True)
+        rows.addRow("", self.avoid_note)
         rows.addRow("Keep last",
                     self._bind_spin("image.keep_images", 0, 500, " images",
                                     10))
@@ -782,6 +797,14 @@ class SettingsPanel(QWidget):
         more.setToolTip("Browse and download models from Civitai")
         more.clicked.connect(self._browse_models)
         ck_row.addWidget(more)
+
+        # Beside the models button rather than in a section of its own:
+        # they are the same activity, and a LoRA is only interesting to
+        # somebody already thinking about which model to use.
+        loras = QPushButton("LoRAs")
+        loras.setToolTip("Browse and download LoRAs from Civitai")
+        loras.clicked.connect(self._browse_loras)
+        ck_row.addWidget(loras)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self._reload_checkpoints)
         ck_row.addWidget(refresh)
@@ -800,6 +823,13 @@ class SettingsPanel(QWidget):
                             for i in range(comfy_from, self.form.count())]
         # Applied now that both halves exist, so a panel opened while
         # set to online does not start out showing them.
+        self._safety_section()
+        # The Avoid row is built before this section exists, so its note
+        # is filled in once both are there - otherwise opening Settings
+        # with safe mode already on shows nothing until the tick is
+        # touched.
+        self._sync_avoid_note()
+        self._lora_section()
         self._sync_backend_rows()
 
     def _profiles_section(self):
@@ -980,6 +1010,8 @@ class SettingsPanel(QWidget):
         self._check_suffix()
         self._sync_backend_rows()
         self._reload_models()
+        self._sync_safe()
+        self._sync_avoid_note()
         self._run_side_effects(set(self._widgets))
 
     def _reload_models(self):
@@ -1074,6 +1106,110 @@ class SettingsPanel(QWidget):
         browser.installed_changed.connect(self._reload_checkpoints)
         browser.exec()
         self._reload_checkpoints()
+
+    def _safety_section(self):
+        """
+        One tick, and an honest account of what it does.
+
+        The explanation matters as much as the control. Every layer
+        behind it is leaky on its own, and somebody who believes this
+        makes explicit output impossible will be more surprised than
+        somebody who was told the truth.
+        """
+        self.form.addWidget(heading("Safe mode"))
+
+        self.safe_tick = QCheckBox("Avoid explicit images")
+        self.safe_tick.setChecked(
+            bool(self.s.get("safety.safe_mode", False)))
+        self.safe_tick.toggled.connect(self._toggle_safe)
+        self.form.addWidget(self.safe_tick)
+
+        self.form.addWidget(hint(
+            "While this is on: safety terms are added to the negative "
+            "prompt, prompts asking for explicit images are refused, "
+            "models flagged as adult are hidden, every picture is "
+            "checked, and anything flagged is blurred in the gallery "
+            "and kept off the overlay."))
+        self.form.addWidget(hint(
+            "None of those is reliable on its own, and together they "
+            "make explicit output unlikely rather than impossible. The "
+            "model matters most: one merged for explicit output will "
+            "defeat all of it."))
+
+    def _sync_avoid_note(self):
+        """Say what safe mode is adding, or nothing when it is off."""
+        note = getattr(self, "avoid_note", None)
+        if note is None:
+            return
+        from avcore.safety import NEGATIVE_TERMS
+
+        if bool(self.s.get("safety.safe_mode", False)):
+            note.setText(
+                f"Safe mode also avoids: {NEGATIVE_TERMS}")
+            note.show()
+        else:
+            note.clear()
+            note.hide()
+
+    def _sync_safe(self):
+        """
+        Show what the setting says, without firing the handler.
+
+        The tick is built by hand rather than through the field helper,
+        so the panel's own restore pass does not know about it - which
+        left Settings showing safe mode off while the strip had just
+        turned it on.
+        """
+        tick = getattr(self, "safe_tick", None)
+        if tick is None:
+            return
+        wanted = bool(self.s.get("safety.safe_mode", False))
+        if tick.isChecked() != wanted:
+            tick.blockSignals(True)
+            tick.setChecked(wanted)
+            tick.blockSignals(False)
+
+    def _toggle_safe(self, on):
+        self._save("safety.safe_mode", bool(on))
+        self._sync_avoid_note()
+        window = self.window()
+        sync = getattr(window, "_sync_quick", None)
+        if sync is not None:
+            sync()
+
+    def _lora_section(self):
+        """
+        Which LoRAs apply, listed under the model that they sit on top of.
+
+        Here rather than in a dialog because it is a standing choice: the
+        model and its LoRAs are one decision, and splitting them across
+        two windows makes it hard to see what will actually be used.
+        """
+        from .lora_chooser import LoraChooser
+
+        self.form.addWidget(heading("LoRAs"))
+        self.loras = LoraChooser(self.s)
+        self.loras.changed.connect(self._loras_changed)
+        self.form.addWidget(self.loras)
+
+    def _loras_changed(self):
+        """Tell the strips, which show the same choice in miniature."""
+        window = self.window()
+        sync = getattr(window, "_sync_quick", None)
+        if sync is not None:
+            sync()
+
+    def _browse_loras(self):
+        """
+        The same browser, pointed at LoRAs.
+
+        One dialog rather than two: the only differences are the word it
+        searches Civitai for and the folder things land in, and a second
+        copy would be a second place for a bug to live.
+        """
+        from .model_browser import ModelBrowser
+
+        ModelBrowser(self.s, kind="LORA", parent=self).exec()
 
     def _pick_checkpoint(self, _i):
         self._save("comfyui.checkpoint", self.checkpoint.currentData() or "")

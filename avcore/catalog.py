@@ -26,6 +26,39 @@ MAX_ENTRIES = 2000
 UNRECORDED = "\x00unrecorded"
 
 
+def has_transparency(path):
+    """
+    Does this PNG carry an alpha channel?
+
+    Read from the header rather than by decoding the picture: the
+    gallery asks this of every file each time a filter changes, and
+    loading a few hundred full-size images to find out would make
+    scrolling crawl.
+
+    A PNG's IHDR is always the first chunk, and its colour type says
+    whether there is alpha - 4 is grey with alpha, 6 is colour with
+    alpha. This reports what the file can hold rather than whether any
+    pixel is actually see-through, which is the same thing in practice
+    here: only cut-outs are written with an alpha channel at all.
+    """
+    path = Path(path)
+    if path.suffix.lower() not in (".png", ".webp"):
+        return False
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(26)
+    except OSError:
+        return False
+
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        # WEBP and anything else: not worth opening, and nothing this
+        # app writes puts alpha in them.
+        return False
+    if head[12:16] != b"IHDR":
+        return False
+    return head[25] in (4, 6)
+
+
 def model_key(backend, model):
     """
     One value identifying what made an image, for matching and filtering.

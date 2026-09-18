@@ -383,7 +383,13 @@ class MainWindow(QMainWindow):
         return f"http://127.0.0.1:{port}/overlay.html{suffix}"
 
     def _copy_url(self):
-        QGuiApplication.clipboard().setText(self._overlay_url(bare=True))
+        # The version rides along in the URL. OBS keys its cache on the
+        # address, so a page that changed shape between releases - the
+        # day it learned to be transparent, for instance - is fetched
+        # fresh rather than carried over from the last one.
+        url = self._overlay_url(bare=True)
+        joiner = "&" if "?" in url else "?"
+        QGuiApplication.clipboard().setText(f"{url}{joiner}v={__version__}")
         server = getattr(self.engine, "server", None)
         if server is not None and not server.is_running():
             # Handing over a URL that cannot answer would look like an OBS

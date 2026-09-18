@@ -108,25 +108,31 @@ class ModelFetch(QThread):
     progress = Signal("qint64", "qint64")
     done = Signal(str)          # empty when it worked
 
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings, spec=None, folder=None, parent=None):
+        """`spec` says which extra to fetch; the video model by default."""
         super().__init__(parent)
         self.s = settings
+        self.spec = spec
+        self.folder = folder
 
     def run(self):
         from avcore.models import ModelInfo, download
         from avcore.setup import VIDEO_MODEL, checkpoints_dir
 
+        spec = self.spec or VIDEO_MODEL
+        folder = self.folder or checkpoints_dir(self.s)
+
         info = ModelInfo(
-            name=VIDEO_MODEL["label"],
+            name=spec["label"],
             description="",
-            base_model="SVD",
+            base_model="",
             nsfw=False,
-            file_name=VIDEO_MODEL["name"],
-            size_bytes=VIDEO_MODEL["bytes"],
-            download_url=VIDEO_MODEL["url"],
+            file_name=spec["name"],
+            size_bytes=spec["bytes"],
+            download_url=spec["url"],
         )
         try:
-            download(info, checkpoints_dir(self.s),
+            download(info, folder,
                      on_progress=lambda a, b: self.progress.emit(a, b))
             self.done.emit("")
         except Exception as exc:
@@ -415,6 +421,28 @@ class SetupPanel(QWidget):
         self.video_bar.hide()
         column.addWidget(self.video_bar)
 
+        from avcore.setup import CUTOUT_MODEL
+
+        cut_row = QHBoxLayout()
+        cut_row.setSpacing(8)
+        self.cutout_label = QLabel(f"      {CUTOUT_MODEL['label']}")
+        self.cutout_label.setWordWrap(True)
+        cut_row.addWidget(self.cutout_label, 1)
+        self.cutout_btn = QPushButton("Install")
+        self.cutout_btn.clicked.connect(self._toggle_cutout)
+        cut_row.addWidget(self.cutout_btn)
+        column.addLayout(cut_row)
+
+        self.cutout_note = QLabel("      " + CUTOUT_MODEL["note"])
+        self.cutout_note.setObjectName("fieldLabel")
+        self.cutout_note.setWordWrap(True)
+        column.addWidget(self.cutout_note)
+
+        self.cutout_bar = QProgressBar()
+        self.cutout_bar.setTextVisible(True)
+        self.cutout_bar.hide()
+        column.addWidget(self.cutout_bar)
+
         return box
 
     def _updates_section(self):
@@ -570,6 +598,82 @@ class SetupPanel(QWidget):
             self.status.setText(
                 "The video model is installed. Animate this... now "
                 "appears on gallery pictures.")
+        self.refresh()
+
+    def _sync_cutout(self):
+        """Say whether the matting model is installed."""
+        from avcore.setup import CUTOUT_MODEL, cutout_installed
+
+        busy = (getattr(self, "_cutout_worker", None) is not None
+                and self._cutout_worker.isRunning())
+        have = cutout_installed(self.s)
+
+        self.cutout_btn.setEnabled(not busy)
+        self.cutout_btn.setText("Uninstall" if have else "Install")
+        self.cutout_btn.setObjectName("denyButton" if have else "")
+        self.cutout_btn.style().unpolish(self.cutout_btn)
+        self.cutout_btn.style().polish(self.cutout_btn)
+
+        size = CUTOUT_MODEL["bytes"] / 1_000_000_000
+        self.cutout_note.setText(
+            "      " + CUTOUT_MODEL["note"]
+            + ("   Installed." if have
+               else f"   Not installed, {size:.2f} GB to download."))
+
+    def _toggle_cutout(self):
+        """Fetch the matting model, or remove it."""
+        from avcore.setup import CUTOUT_MODEL, cutout_dir, cutout_file
+        from avcore.setup import cutout_installed
+
+        if cutout_installed(self.s):
+            path = cutout_file(self.s)
+            size = f"{path.stat().st_size / 1_000_000:.0f} MB"
+            if ConfirmUninstall(CUTOUT_MODEL["label"], size, False,
+                                self).exec() != QDialog.Accepted:
+                return
+            try:
+                path.unlink()
+            except OSError as exc:
+                self.status.setText(
+                    f"Could not remove it: {exc.strerror or exc}")
+                return
+            # Pictures would otherwise keep being asked for as cut-outs
+            # and quietly come back as rectangles.
+            self.s.set("image.cutout", False)
+            self.s.save()
+            self.status.setText(
+                f"Removed the cut-out model, freeing {size}.")
+            self.refresh()
+            return
+
+        size = f"{CUTOUT_MODEL['bytes'] / 1_000_000:.0f} MB"
+        if ConfirmInstall(CUTOUT_MODEL["label"], size,
+                          cutout_dir(self.s),
+                          self).exec() != QDialog.Accepted:
+            return
+
+        self.cutout_bar.setRange(0, 100)
+        self.cutout_bar.setValue(0)
+        self.cutout_bar.show()
+        self._cutout_worker = ModelFetch(
+            self.s, CUTOUT_MODEL, cutout_dir(self.s), self)
+        self._cutout_worker.progress.connect(self._cutout_progress)
+        self._cutout_worker.done.connect(self._cutout_done)
+        self._cutout_worker.start()
+        self._sync_cutout()
+
+    def _cutout_progress(self, done, total):
+        if total:
+            self.cutout_bar.setValue(int(done * 100 / total))
+            self.cutout_bar.setFormat(
+                f"%p%   {done / 1_000_000:.0f} of "
+                f"{total / 1_000_000:.0f} MB")
+
+    def _cutout_done(self, message):
+        self.cutout_bar.hide()
+        self.status.setText(
+            message or "Cut-out images are ready. The tick is beside the "
+                       "prompt box.")
         self.refresh()
 
     def _sync_tiers(self):
@@ -757,6 +861,7 @@ class SetupPanel(QWidget):
         # up to date in the same pass rather than on their own timer.
         self._sync_tiers()
         self._sync_video()
+        self._sync_cutout()
         self.ready_changed.emit(rep["ready"])
         return rep
 

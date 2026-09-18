@@ -318,10 +318,13 @@ asked = {}
 
 
 def fake_search(query="", base_model="SD 1.5", include_adult=False,
-                limit=20, api_key=None, opener=None):
+                limit=20, kind="Checkpoint", api_key=None, opener=None):
     asked["query"] = query
     asked["base_model"] = base_model
     asked["include_adult"] = include_adult
+    # Recorded so the LoRA browser can be shown to ask for LoRAs rather
+    # than merely to put them somewhere else.
+    asked["kind"] = kind
     return [
         ModelInfo(name="Alpha", description="A model.", base_model="SD 1.5",
                   nsfw=False, file_name="alpha.safetensors",
@@ -531,6 +534,289 @@ check("the wrap this replaces produced a negative",
 check("and sizes under the limit were never affected",
       2_000_000_000 < LIMIT,
       "which is why small models looked fine and nobody noticed")
+
+print("\n=== LoRAs ===")
+# The same browser, pointed at a different word and a different folder.
+# One dialog rather than two, because a second copy would be a second
+# place for a bug to live.
+from avcore.setup import checkpoints_dir, loras_dir
+from avgui.model_browser import ModelBrowser
+
+_lora_view = ModelBrowser(sb, kind="LORA")
+_ckpt_view = ModelBrowser(sb, kind="Checkpoint")
+
+check("LoRAs land in the loras folder",
+      _lora_view.target_folder().name == "loras",
+      str(_lora_view.target_folder().name))
+check("checkpoints still land in checkpoints",
+      _ckpt_view.target_folder().name == "checkpoints")
+check("which are different folders",
+      loras_dir(sb) != checkpoints_dir(sb),
+      "ComfyUI looks in its own place for each, and a LoRA among the "
+      "checkpoints simply never appears")
+check("and they sit side by side",
+      loras_dir(sb).parent == checkpoints_dir(sb).parent)
+
+check("the window says which it is showing",
+      _lora_view.windowTitle() == "LoRAs"
+      and _ckpt_view.windowTitle() == "Models",
+      f"{_lora_view.windowTitle()} / {_ckpt_view.windowTitle()}")
+check("so does the tab",
+      "LoRA" in _lora_view.tabs.tabText(0)
+      and "model" in _ckpt_view.tabs.tabText(0))
+
+_lora_view.close()
+_ckpt_view.close()
+
+print("\n=== finding the cut-outs again ===")
+# Read from the PNG header rather than by decoding: the gallery asks
+# this of every file whenever a filter changes.
+from avcore.catalog import has_transparency
+from avgui.filters import Filters
+from PySide6.QtGui import QColor, QImage
+
+_alpha = tmp / "cut.png"
+_clear = QImage(32, 32, QImage.Format_ARGB32)
+_clear.fill(QColor(0, 0, 0, 0))
+_clear.save(str(_alpha), "PNG")
+
+_solid = tmp / "flat.png"
+_opaque = QImage(32, 32, QImage.Format_RGB32)
+_opaque.fill(QColor(20, 30, 40))
+_opaque.save(str(_solid), "PNG")
+
+check("a cut-out is recognised", has_transparency(_alpha))
+check("an ordinary picture is not", not has_transparency(_solid))
+check("and something that is not there is not either",
+      not has_transparency(tmp / "missing.png"),
+      "a missing file must not raise mid-filter")
+
+_kinds = Filters()
+_kinds.kind = "transparent"
+check("the filter keeps cut-outs",
+      _kinds.matches(_alpha, {}, False, False))
+check("and drops the rest",
+      not _kinds.matches(_solid, {}, False, False))
+
+_kinds.kind = "any"
+check("with Any type, both are shown",
+      _kinds.matches(_alpha, {}, False, False)
+      and _kinds.matches(_solid, {}, False, False))
+
+print("\n=== applying LoRAs ===")
+# Chained between the checkpoint and everything that reads from it. Both
+# the model and the text encoder come through the chain: one that
+# changed the model but not the CLIP gives a picture that half-remembers
+# the style it was asked for.
+from avcore.images import ComfyBackend
+from avgui.lora_chooser import active_count, merged, stored
+
+_loras = loras_dir(sb)
+_loras.mkdir(parents=True, exist_ok=True)
+for _name in ("one.safetensors", "two.safetensors"):
+    (_loras / _name).write_bytes(b"0" * 2048)
+
+_backend = ComfyBackend(sb)
+_backend.set_checkpoint("pinned.safetensors")
+
+print("\n  which ones count as chosen:")
+sb.set("comfyui.loras", [
+    {"name": "one.safetensors", "strength": 0.8, "on": True},
+    {"name": "two.safetensors", "strength": 1.0, "on": False},
+    {"name": "gone.safetensors", "strength": 1.0, "on": True},
+])
+_chosen = _backend.chosen_loras()
+check("a switched-on one is used",
+      ("one.safetensors", 0.8) in _chosen)
+check("a switched-off one is not",
+      not any(n == "two.safetensors" for n, _s in _chosen))
+check("and one that is no longer on disk is skipped",
+      not any(n == "gone.safetensors" for n, _s in _chosen),
+      "passing it to ComfyUI would fail the whole job over a file "
+      "somebody deleted months ago")
+
+sb.set("comfyui.loras", [
+    {"name": "one.safetensors", "strength": 99.0, "on": True}])
+check("a silly strength is brought back to something sane",
+      _backend.chosen_loras()[0][1] <= 4.0,
+      str(_backend.chosen_loras()[0][1]))
+
+sb.set("comfyui.loras", "not a list")
+check("nonsense in the setting does not raise",
+      _backend.chosen_loras() == [],
+      "a hand-edited settings file should not stop the app generating")
+
+print("\n  how they are chained:")
+sb.set("comfyui.loras", [
+    {"name": "one.safetensors", "strength": 0.8, "on": True},
+    {"name": "two.safetensors", "strength": 0.5, "on": True},
+])
+_graph = _backend._workflow("a cottage", 768, 768, 7)
+_chain = [key for key, node in _graph.items()
+          if node["class_type"] == "LoraLoader"]
+check("one loader per LoRA", len(_chain) == 2, str(_chain))
+check("the first hangs off the checkpoint",
+      _graph["20"]["inputs"]["model"] == ["1", 0])
+check("the second hangs off the first",
+      _graph["21"]["inputs"]["model"] == ["20", 0],
+      "each is applied over the last, so order matters")
+check("the sampler reads the end of the chain",
+      _graph["5"]["inputs"]["model"] == ["21", 0])
+check("and so does the text encoder",
+      _graph["2"]["inputs"]["clip"] == ["21", 1],
+      "a LoRA that moves the model but not the CLIP half-works")
+check("strengths are carried through",
+      _graph["20"]["inputs"]["strength_model"] == 0.8
+      and _graph["21"]["inputs"]["strength_model"] == 0.5)
+
+sb.set("comfyui.loras", [])
+_plain = _backend._workflow("a cottage", 768, 768, 7)
+check("with none chosen, nothing is inserted",
+      not any(n["class_type"] == "LoraLoader" for n in _plain.values()))
+check("and the graph is wired as it always was",
+      _plain["5"]["inputs"]["model"] == ["1", 0]
+      and _plain["2"]["inputs"]["clip"] == ["1", 1])
+
+print("\n  what the chooser shows:")
+sb.set("comfyui.loras", [
+    {"name": "one.safetensors", "strength": 0.7, "on": True}])
+_rows = merged(sb)
+check("every installed LoRA is listed", len(_rows) == 2, str(len(_rows)))
+check("the chosen one keeps its strength",
+      next(r for r in _rows if r["name"] == "one.safetensors")["strength"]
+      == 0.7)
+check("one never seen before starts off",
+      not next(r for r in _rows
+               if r["name"] == "two.safetensors")["on"],
+      "installing a LoRA should not silently change every picture")
+check("the count is what the strip shows", active_count(sb) == 1)
+
+sb.set("comfyui.loras", [])
+
+print("\n=== which LoRAs can actually be used ===")
+# Two ways for a LoRA to do nothing, and both are silent: one built on
+# another architecture, and one for the other half of Stable Diffusion.
+# ComfyUI loads either happily, matches none of the weights, and the
+# picture comes out unchanged with no error to explain why.
+from avcore.setup import _family_from_header
+
+check("an SDXL LoRA is recognised by its two text encoders",
+      _family_from_header({
+          "lora_te1_text_model_encoder_layers_0_mlp_fc1.alpha": {},
+          "lora_te2_text_model_encoder_layers_0_mlp_fc1.alpha": {},
+          "lora_unet_down_blocks_0.alpha": {},
+      }) == "sdxl")
+
+check("an SD 1.5 LoRA by its one",
+      _family_from_header({
+          "lora_te_text_model_encoder_layers_0_mlp_fc1.alpha": {},
+          "lora_unet_down_blocks_0.alpha": {},
+      }) == "sd15")
+
+check("a transformer LoRA is neither",
+      _family_from_header({
+          "diffusion_model.transformer_blocks.0.attn.add_k_proj.lora_A.weight": {},
+      }) is None,
+      "Flux, Qwen, Wan and friends have no U-Net at all")
+
+print("\n  the weights outrank the label:")
+# A real file on this machine declared sd_1.5 while carrying 1680
+# transformer-block tensors, the same shape as the Qwen LoRA beside it.
+check("a mislabelled file is judged by what is in it",
+      _family_from_header({
+          "__metadata__": {"ss_base_model_version": "sd_1.5"},
+          "diffusion_model.transformer_blocks.0.attn.add_k_proj.lora_A.weight": {},
+      }) is None,
+      "trusting the label would list it as usable, which is the exact "
+      "confusion this prevents")
+
+check("but the label is used when the keys say nothing",
+      _family_from_header({
+          "__metadata__": {"ss_base_model_version": "sdxl_base_v1-0"},
+          "something_unfamiliar": {},
+      }) == "sdxl",
+      "better than nothing when it is all there is")
+
+check("and an empty file is simply unknown",
+      _family_from_header({}) is None)
+
+print("\n  what the chooser says:")
+from avgui.lora_chooser import verdict
+
+_note = verdict(sb, "nothing-here.safetensors")
+check("a file that cannot be read is called incompatible",
+      _note[0] is False
+      and "Stable Diffusion" in _note[1],
+      str(_note))
+
+print("\n=== no route to a model bypasses safe mode ===")
+# The pickers were filtered, but "first found" never went through one:
+# it asked ComfyUI for everything and took the first, which on a real
+# machine was the adult model the lists were hiding.
+from avcore.images import ComfyBackend as _Backend
+from avcore.setup import looks_adult
+
+_names = ["aModelNSFW_v1.safetensors", "ordinary_v2.safetensors",
+          "another_v3.safetensors"]
+
+
+class _Pretend(_Backend):
+    """Stands in for ComfyUI, with an adult model listed first."""
+
+    def list_checkpoints(self):
+        return list(_names)
+
+
+sb.set("comfyui.checkpoint", "")
+sb.set("safety.safe_mode", False)
+_loose = _Pretend(sb).checkpoint()
+check("off, first found takes ComfyUI's first",
+      _loose == "aModelNSFW_v1.safetensors", _loose)
+
+sb.set("safety.safe_mode", True)
+_tight = _Pretend(sb).checkpoint()
+check("on, it skips to the first allowed one",
+      _tight == "ordinary_v2.safetensors", _tight)
+check("which is not an adult model", not looks_adult(_tight))
+
+print("\n  a named adult model is refused too:")
+sb.set("comfyui.checkpoint", "aModelNSFW_v1.safetensors")
+_named = _Pretend(sb).checkpoint()
+check("asking for one by name does not get it",
+      not looks_adult(_named), _named,)
+check("something usable is used instead",
+      _named in _names)
+
+print("\n  the cache notices the tick:")
+_one = _Pretend(sb)
+_one.s.set("comfyui.checkpoint", "")
+_one.s.set("safety.safe_mode", False)
+_before = _one.checkpoint()
+_one.s.set("safety.safe_mode", True)
+_after = _one.checkpoint()
+check("the same backend re-resolves rather than remembering",
+      _before != _after and not looks_adult(_after),
+      f"{_before} then {_after}")
+
+print("\n  when nothing is left:")
+
+
+class _AllAdult(_Backend):
+    def list_checkpoints(self):
+        return ["oneNSFW.safetensors", "twoHentai.safetensors"]
+
+
+sb.set("comfyui.checkpoint", "")
+try:
+    _AllAdult(sb).checkpoint()
+    _said = ""
+except Exception as exc:
+    _said = str(exc)
+check("it says so rather than quietly using one",
+      "safe mode" in _said.lower(), _said[:70] or "no error raised")
+
+sb.set("safety.safe_mode", False)
+sb.set("comfyui.checkpoint", "")
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

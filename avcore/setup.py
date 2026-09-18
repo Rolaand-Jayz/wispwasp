@@ -80,6 +80,144 @@ VIDEO_MODEL = {
 }
 
 
+# Cutting the background out of a picture. Small enough that it is
+# barely an imposition, but still not fetched unless somebody asks:
+# plenty of people want rectangles.
+CUTOUT_MODEL = {
+    "label": "Cut-out images (transparent background)",
+    "note": "About 444 MB. Generated images can have their background "
+            "removed, which OBS shows as a floating subject rather than "
+            "a rectangle.",
+    "name": "birefnet.safetensors",
+    "folder": "background_removal",
+    "url": ("https://huggingface.co/Comfy-Org/BiRefNet/resolve/main"
+            "/background_removal/birefnet.safetensors"),
+    "bytes": 444_000_000,
+    "min_bytes": 400_000_000,
+    "sha256": ("9ab37426bf4de0567af6b5d21b16151357149139362e6e"
+               "8992021b8ce356a154"),
+}
+
+
+_lora_cache = {}
+
+
+def lora_family(path):
+    """
+    What a LoRA was trained against: "sd15", "sdxl", or None.
+
+    None means "not a Stable Diffusion LoRA this app can use" - a Flux,
+    Qwen or Wan one, say. Those are the dangerous case: ComfyUI loads
+    them happily, matches none of the weights, and generates a picture
+    that is simply unchanged. No error, no warning, nothing to notice
+    except that the LoRA does not seem to do anything.
+
+    Read from the file rather than the name, for the same reason as
+    checkpoints: people rename things, and a hand-dropped LoRA carries
+    no catalogue entry at all.
+
+    Two things are consulted. Trainers write their base model into the
+    safetensors metadata, which is the most direct answer when it is
+    there. Failing that, the shape of the keys says it: an SDXL LoRA
+    carries weights for two text encoders, SD 1.5 for one, and anything
+    built on a transformer backbone names its blocks quite differently.
+    """
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    token = (str(path), stat.st_size, stat.st_mtime_ns)
+    if token in _lora_cache:
+        return _lora_cache[token]
+
+    family = None
+    try:
+        with path.open("rb") as handle:
+            length = struct.unpack("<Q", handle.read(8))[0]
+            if 0 < length < 100_000_000:
+                header = json.loads(handle.read(length).decode("utf-8"))
+                family = _family_from_header(header)
+    except (OSError, ValueError, struct.error, UnicodeDecodeError):
+        family = None
+
+    _lora_cache[token] = family
+    return family
+
+
+def _family_from_header(header):
+    """
+    The judgement itself, kept apart so it can be tested directly.
+
+    The keys decide, not the metadata. A LoRA found on this machine
+    declared ``ss_base_model_version = sd_1.5`` while carrying 1680
+    transformer-block tensors - the same shape as a Qwen LoRA sitting
+    beside it, and nothing an SD 1.5 model has any use for. Trusting
+    the label would have put it in the list as usable, which is the
+    exact confusion this is meant to prevent.
+
+    Metadata is consulted only when the keys say nothing either way.
+    """
+    keys = [k for k in header if k != "__metadata__"]
+    text = " ".join(keys)
+
+    # Transformer backbones - Flux, Qwen, Wan, SD3 and friends. No
+    # U-Net, and nothing an SD 1.5 or SDXL model can use.
+    if "diffusion_model.transformer_blocks" in text \
+            or "double_blocks" in text or "single_blocks" in text \
+            or "transformer.transformer_blocks" in text:
+        return None
+
+    # Two text encoders is the SDXL giveaway, as it is for a checkpoint.
+    if "lora_te2" in text or "text_encoder_2" in text:
+        return "sdxl"
+    if "lora_unet_" in text or "lora_te_" in text or "lora_te1" in text:
+        return "sdxl" if "lora_te1" in text else "sd15"
+
+    # Nothing recognisable in the keys: fall back to what the trainer
+    # wrote down, which is better than nothing when it is all there is.
+    meta = header.get("__metadata__") or {}
+    said = " ".join(str(meta.get(key, "")) for key in
+                    ("ss_base_model_version", "ss_sd_model_name",
+                     "modelspec.architecture")).lower()
+    if "xl" in said:
+        return "sdxl"
+    if "sd_v1" in said or "sd-v1" in said or "v1-5" in said \
+            or "sd_1.5" in said:
+        return "sd15"
+    return None
+
+
+def loras_dir(settings=None, root=None):
+    """
+    Where ComfyUI keeps LoRAs.
+
+    Beside the checkpoints rather than among them: ComfyUI looks in a
+    folder of its own for these, and a LoRA dropped in with the
+    checkpoints simply never appears.
+    """
+    return checkpoints_dir(settings, root).parent / "loras"
+
+
+def cutout_dir(settings=None, root=None):
+    """Where the matting model lives - beside the checkpoints, not in."""
+    return checkpoints_dir(settings, root).parent / CUTOUT_MODEL["folder"]
+
+
+def cutout_file(settings=None, root=None):
+    return cutout_dir(settings, root) / CUTOUT_MODEL["name"]
+
+
+def cutout_installed(settings=None, root=None):
+    """Is the matting model there and whole?"""
+    path = cutout_file(settings, root)
+    try:
+        return (path.exists()
+                and path.stat().st_size >= CUTOUT_MODEL["min_bytes"])
+    except OSError:
+        return False
+
+
 def video_file(settings=None, root=None):
     """Where the video model would live."""
     return checkpoints_dir(settings, root) / VIDEO_MODEL["name"]
@@ -733,6 +871,23 @@ def family_of(path):
     return family
 
 
+# Words that mark a checkpoint as adult. Filenames only, because an
+# installed .safetensors carries nothing else to go on - Civitai's flag
+# is not in the file, and a model renamed by hand says whatever its
+# owner typed. Crude, and honest about being crude: it catches the
+# obvious ones and misses anything discreetly named.
+ADULT_WORDS = (
+    "nsfw", "porn", "hentai", "erotic", "xxx", "lewd", "uncensored",
+    "nude", "naked", "sex", "explicit", "fetish", "bimbo", "hypno",
+)
+
+
+def looks_adult(name):
+    """Does a model's filename advertise itself as adult?"""
+    lowered = Path(name).stem.lower()
+    return any(word in lowered for word in ADULT_WORDS)
+
+
 def models_for_tier(key, settings=None, root=None):
     """
     Every installed checkpoint that would satisfy this option.
@@ -757,6 +912,14 @@ def models_for_tier(key, settings=None, root=None):
             continue
         if family_of(path) == key:
             found.append(path)
+
+    from .safety import is_on
+
+    if is_on(settings):
+        # Filtered here rather than in each picker, so a model hidden
+        # from one list cannot still be chosen from another. Filenames
+        # are all there is to go on: Civitai's flag is not in the file.
+        found = [path for path in found if not looks_adult(path.name)]
     return found
 
 

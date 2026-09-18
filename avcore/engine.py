@@ -772,9 +772,25 @@ class Engine:
             min_words=int(self.s.get("speech.min_words", 3)),
         )
         self._set(prompt=prompt, cycles=self.state["cycles"] + 1)
+
+        # Refused before anything is generated, while safe mode is on.
+        # Counted as a skip like any other, so the tally on the Live
+        # page still adds up.
+        from .safety import is_on as _safe_mode
+        from .safety import prompt_is_blocked
+
+        if _safe_mode(self.s) and prompt_is_blocked(prompt):
+            self._set(mode="idle", busy=False, skip_reason="safe mode",
+                      status="Skipped - safe mode",
+                      skips=self._count_skip("safe mode"))
+            self._remember(text, skipped="safe mode")
+            self._wait_cycle()
+            return
+
         made = self._render(prompt, source="live")
         if made is not None:
-            self.publish_overlay(made, source="live")
+            if self._allowed_on_overlay(made):
+                self.publish_overlay(made, source="live")
             self._set(status="Listening")
         self._remember(text, prompt=prompt, image=made,
                        base=bare or prompt, suffix=style)
@@ -957,6 +973,40 @@ class Engine:
         self._write_state_json()
         return True
 
+    def _allowed_on_overlay(self, path):
+        """
+        Whether a freshly made picture may go on the overlay.
+
+        Three answers, not two. Clearly safe goes straight up. Clearly
+        not is held back and marked, so it is blurred in the gallery
+        rather than lost. Unsure is marked too but still shown - being
+        blocked by a maybe, in the middle of a stream, is its own kind
+        of failure.
+
+        Only consulted while safe mode is on; off, this never runs and
+        costs nothing.
+        """
+        from .safety import is_on, verdict
+
+        if not is_on(self.s):
+            return True
+
+        found = verdict(path)
+        if found == "safe":
+            return True
+
+        # Marked in the catalogue, which is what makes the gallery blur
+        # it and the Censored filter find it.
+        try:
+            self.catalog.set_censored(path, True)
+        except Exception:
+            pass
+
+        if found == "unsafe":
+            self._set(status="Held back - safe mode")
+            return False
+        return True
+
     def publish_overlay(self, path, source="manual"):
         """
         Put an image on the overlay. Live cycles call this automatically;
@@ -1004,6 +1054,11 @@ class Engine:
             "prompt": snap.get("prompt", ""),
             "transcript": snap.get("transcript", ""),
             "status": snap.get("status", ""),
+            # Whether the picture has a transparent background. The page
+            # needs to know two things from it: not to crop the subject
+            # to fill the screen, which "cover" would do, and that the
+            # picture is meant to float rather than to cover the scene.
+            "cutout": bool(self.s.get("image.cutout", False)),
             "updated": time.time(),
         }
         tmp = out_dir / "state.json.tmp"
@@ -1261,6 +1316,20 @@ class Engine:
 
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             dest = save_dir / f"ai_{stamp}_{i + 1}.{self._backend.extension}"
+
+            # The same refusal the listening cycle makes. This path had
+            # none of it: safe mode steered the negative prompt and
+            # checked the picture afterwards, but a typed prompt asking
+            # outright was generated without comment - which is what
+            # "safe mode does not seem to work" turned out to mean.
+            from .safety import is_on as _safe_mode
+            from .safety import prompt_is_blocked
+
+            if _safe_mode(self.s) and prompt_is_blocked(job.prompt):
+                self._set(mode="idle", busy=False,
+                          status="Refused - safe mode is on")
+                return
+
             got = self._render(job.prompt, source="manual", dest=dest)
             if got is None:
                 break   # cancelled or failed; _render already reported it
@@ -1268,7 +1337,7 @@ class Engine:
 
             # publish_overlay handles getting the file into the overlay
             # folder, so there is one copy of that logic rather than two.
-            if auto:
+            if auto and self._allowed_on_overlay(got):
                 self.publish_overlay(got, source="manual")
             elif i == job.amount - 1:
                 self._set(pending_manual=str(got))
@@ -1285,5 +1354,9 @@ class Engine:
         """Send the last manual image to the overlay (auto-push off)."""
         pending = self.state.get("pending_manual")
         if not pending:
+            return False
+        # Pushed by hand, but still checked: the button is a decision to
+        # show it, not a decision to skip the check.
+        if not self._allowed_on_overlay(pending):
             return False
         return self.publish_overlay(pending, source="manual")

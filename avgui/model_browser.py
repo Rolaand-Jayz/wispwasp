@@ -46,16 +46,19 @@ class SearchWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, query, base_model, include_adult, api_key,
+                 kind="Checkpoint",
                  parent=None):
         super().__init__(parent)
         self.query = query
         self.base_model = base_model
         self.include_adult = include_adult
         self.api_key = api_key
+        self.kind = kind
 
     def run(self):
         try:
             self.found.emit(search(
+            kind=self.kind,
                 query=self.query, base_model=self.base_model,
                 include_adult=self.include_adult, limit=30,
                 api_key=self.api_key))
@@ -249,10 +252,16 @@ class ModelBrowser(QDialog):
 
     installed_changed = Signal()
 
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings, kind="Checkpoint", parent=None):
+        """`kind` is Checkpoint or LORA - the same dialog serves both."""
         super().__init__(parent)
         self.s = settings
-        self.setWindowTitle("Models")
+        self.kind = kind
+        self.is_lora = kind.upper() == "LORA"
+        # The word used throughout the dialog, so nothing says "model"
+        # at somebody looking for a LoRA.
+        self.noun = "LoRA" if self.is_lora else "model"
+        self.setWindowTitle("LoRAs" if self.is_lora else "Models")
         self.setModal(True)
         self.resize(660, 580)
 
@@ -271,7 +280,9 @@ class ModelBrowser(QDialog):
         # you have too many are the same errand, and the disk figure on
         # one side is what makes the other side make sense.
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._find_page(), "Find models")
+        self.tabs.addTab(self._find_page(),
+                         "Find LoRAs" if self.is_lora
+                         else "Find models")
         self.tabs.addTab(self._installed_page(), "Installed")
         self.tabs.currentChanged.connect(self._tab_changed)
         outer.addWidget(self.tabs, 1)
@@ -313,8 +324,9 @@ class ModelBrowser(QDialog):
         column.setSpacing(8)
 
         blurb = QLabel(
-            "Downloaded from Civitai into ComfyUI's checkpoints folder, "
-            "and listed once they arrive.")
+            f"Downloaded from Civitai into ComfyUI's "
+            f"{'loras' if self.is_lora else 'checkpoints'} folder, "
+            f"and listed once they arrive.")
         blurb.setObjectName("fieldLabel")
         blurb.setWordWrap(True)
         column.addWidget(blurb)
@@ -341,6 +353,17 @@ class ModelBrowser(QDialog):
         column.addLayout(controls)
 
         self.adult = QCheckBox("Show models flagged as adult")
+        # Safe mode owns this tick while it is on. Disabled rather than
+        # hidden, with the reason on it: a control that silently stops
+        # working is worse than one that says why it cannot.
+        from avcore.safety import is_on as _safe_mode
+
+        if _safe_mode(self.s):
+            self.adult.setChecked(False)
+            self.adult.setEnabled(False)
+            self.adult.setToolTip(
+                "Safe mode is on, in Settings. Turn it off to browse "
+                "these.")
         self.adult.setToolTip(
             "Changes which models are listed. It does not restrain what "
             "any model can produce - that is decided by the model "
@@ -420,6 +443,14 @@ class ModelBrowser(QDialog):
 
     # ---- where things go -------------------------------------------------
 
+    def target_folder(self):
+        """Where a download of this kind belongs."""
+        from avcore.setup import checkpoints_dir, loras_dir
+
+        if self.is_lora:
+            return loras_dir(self.s)
+        return checkpoints_dir(self.s)
+
     def checkpoints_folder(self):
         """
         ComfyUI's checkpoints folder.
@@ -459,7 +490,7 @@ class ModelBrowser(QDialog):
         self._sync_installed()
 
     def refresh_installed(self):
-        folder = self.checkpoints_folder()
+        folder = self.target_folder()
         self.have.clear()
 
         files = installed(folder)
@@ -481,7 +512,8 @@ class ModelBrowser(QDialog):
             self.disk.setText(
                 f"{len(files)} models, {_size(total)} in {folder}")
         else:
-            self.disk.setText(f"No models yet in {folder}")
+            self.disk.setText(
+                f"No {self.noun}s yet in {folder}")
 
         self._show_strays()
 
@@ -571,7 +603,7 @@ class ModelBrowser(QDialog):
         self.installed_changed.emit()
 
     def _tidy(self):
-        folder = self.checkpoints_folder()
+        folder = self.target_folder()
         freed = 0
         failed = 0
         for path in part_files(folder):
@@ -597,13 +629,21 @@ class ModelBrowser(QDialog):
 
         self._search = SearchWorker(
             self.query.text(), self.base.currentData(),
-            self.adult.isChecked(), self._key(), self)
+            self.adult.isChecked(), self._key(), self.kind, self)
         self._search.found.connect(self._show)
         self._search.failed.connect(self._trouble)
         self._search.finished.connect(lambda: self.go.setEnabled(True))
         self._search.start()
 
     def _show(self, models):
+        from avcore.safety import is_on as _safe_mode
+
+        if _safe_mode(self.s):
+            # Belt as well as braces: the request already asks for
+            # none, but a catalogue can mislabel its own entries and
+            # this costs nothing.
+            models = [m for m in models if not m.nsfw]
+
         self.list.clear()
         for info in models:
             item = QListWidgetItem()
@@ -637,7 +677,7 @@ class ModelBrowser(QDialog):
         if chosen is None:
             return
         info = chosen.data(Qt.UserRole)
-        folder = self.checkpoints_folder()
+        folder = self.target_folder()
 
         if ConfirmDownload(info, folder, self).exec() != QDialog.Accepted:
             return

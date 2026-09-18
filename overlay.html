@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <title>Listening</title>
 <style>
   :root { --ink: #f2efe9; --dim: #7d7970; }
@@ -10,7 +11,15 @@
 
   html, body {
     height: 100%;
-    background: #000;
+    /* Transparent, not black. OBS composites a browser source over the
+       scene, so black here means the overlay hides whatever is behind
+       it. That was invisible while every picture filled the frame, and
+       becomes obvious the moment one has a hole in it. */
+    /* !important because OBS injects its own CSS into a browser
+       source, and a rule there should not be able to paint this black
+       by accident. */
+    background: transparent !important;
+    background-color: rgba(0, 0, 0, 0) !important;
     overflow: hidden;
     font-family: "Inter", "Segoe UI", system-ui, sans-serif;
     color: var(--ink);
@@ -28,6 +37,9 @@
     transition: opacity 1.4s ease-in-out;
   }
   .layer.visible { opacity: 1; }
+  /* A cut-out is a subject, not a backdrop: cropping it to fill the
+     screen would take the top off whatever was generated. */
+  .layer.cutout { object-fit: contain; }
 
   .empty {
     position: fixed;
@@ -94,11 +106,13 @@
   let front = 0;
   let currentImage = null;
 
-  function show(name) {
+  function show(name, cutout) {
     const next = layers[1 - front];
     const img = new Image();
     img.onload = () => {
       next.src = img.src;
+      // Cut-outs are shown whole rather than cropped to fill.
+      next.classList.toggle("cutout", !!cutout);
       next.classList.add("visible");
       layers[front].classList.remove("visible");
       front = 1 - front;
@@ -134,7 +148,7 @@
         }
       } else if (s.image !== currentImage) {
         currentImage = s.image;
-        show(s.image);
+        show(s.image, s.cutout);
       }
     } catch (e) {
       if (!bare) statusEl.textContent = "Lost contact with WispWasp.";

@@ -78,6 +78,10 @@ DEFAULTS = {
     },
     "image": {
         "backend": "comfyui",     # comfyui | pollinations
+        # Remove the background from generated images, so they sit on
+        # the stream as a subject rather than a rectangle. Needs the
+        # matting model, which Setup fetches.
+        "cutout": False,
         "width": 1344,
         "height": 768,
         "style_suffix": "highly detailed, dramatic lighting",
@@ -87,10 +91,22 @@ DEFAULTS = {
         "keep_images": 40,
         "manual_auto_push": True,  # manual images go straight to the overlay
     },
+    "safety": {
+        # One tick, five layers: safety terms on the negative prompt,
+        # blocked words refused before generating, adult models hidden,
+        # every picture scored, and anything flagged kept off the
+        # overlay. Off by default, so nothing changes for anybody who
+        # does not ask for it.
+        "safe_mode": False,
+    },
     "comfyui": {
         "url": "http://127.0.0.1:8188",
         "path": "",               # blank = %USERPROFILE%\\ComfyUI
         "checkpoint": "",         # blank = first one found
+        # LoRAs applied on top of the checkpoint, in this order: each
+        # entry is {"name": file, "strength": float, "on": bool}. Order
+        # matters, because each is applied over the last.
+        "loras": [],
         "steps": 20,
         "cfg": 6.5,
         "sampler": "dpmpp_2m",

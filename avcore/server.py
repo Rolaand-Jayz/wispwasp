@@ -69,6 +69,25 @@ class OverlayServer:
                 return "overlay.html is missing", 404
             return send_file(page)
 
+        @app.after_request
+        def _never_cache(response):
+            """
+            Tell every browser not to keep the page.
+
+            OBS's browser source caches hard, and the page changes shape
+            between versions - when it learned to be transparent, a
+            cached copy carried on painting itself black over the scene
+            and looked exactly like the app being broken. "no-cache"
+            only asks for revalidation; "no-store" means it cannot be
+            kept at all, which is what is wanted for a page that is
+            served from localhost and costs nothing to fetch again.
+            """
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0")
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
         @app.route("/state.json")
         def state():
             f = self._overlay_dir() / "state.json"

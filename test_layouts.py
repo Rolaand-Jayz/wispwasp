@@ -407,6 +407,78 @@ check("it is not pinned to a narrow band", right - left > 400,
 check("and the panel can be made genuinely narrow", left < 500,
       f"{left}px - the status bar hides what does not fit")
 
+print("\n=== choosing which half of Stable Diffusion to use ===")
+# The family decides what can be listed under it and what a LoRA has to
+# be to work, so it sits in front of the model rather than in Setup.
+from avcore.setup import models_for_tier
+
+win.set_layout("hybrid")
+win.show_panel("live")
+pump(0.5)
+_quick = win.live.quick
+
+check("the strip offers both",
+      [_quick.family.itemData(i) for i in range(_quick.family.count())]
+      == ["sd15", "sdxl"])
+
+s.set("models.tier", "sd15")
+_quick.refresh()
+pump(0.3)
+_listed = [_quick.model.itemData(i) for i in range(_quick.model.count())
+           if _quick.model.itemData(i)]
+_allowed = {p.name for p in models_for_tier("sd15", s)}
+check("only models of that family are listed",
+      set(_listed) <= _allowed,
+      f"{len(_listed)} listed, {len(_allowed)} of that family")
+
+_quick.family.setCurrentIndex(_quick.family.findData("sdxl"))
+pump(0.5)
+check("switching writes the choice", s.get("models.tier") == "sdxl")
+_listed = [_quick.model.itemData(i) for i in range(_quick.model.count())
+           if _quick.model.itemData(i)]
+_allowed = {p.name for p in models_for_tier("sdxl", s)}
+check("and the list follows it", set(_listed) <= _allowed,
+      f"{_listed}")
+
+print("\n  a model from the other family is not left selected:")
+s.set("models.tier", "sd15")
+s.set("comfyui.checkpoint", "something_sdxl.safetensors")
+_quick.refresh()
+pump(0.2)
+_quick.family.setCurrentIndex(_quick.family.findData("sdxl"))
+pump(0.5)
+_quick.family.setCurrentIndex(_quick.family.findData("sd15"))
+pump(0.5)
+check("it is cleared rather than left pointing at nothing loadable",
+      (s.get("comfyui.checkpoint") or "") == "",
+      f"{s.get('comfyui.checkpoint')!r} - blank means first one found")
+
+print("\n  and the Prompt page shows the same choice:")
+check("both strips agree",
+      win.prompt.quick.family.currentData()
+      == win.live.quick.family.currentData(),
+      "they read the same setting")
+
+print("\n  the LoRA popup can fetch more:")
+# Finding out you have none, and being able to do something about it,
+# belong in the same window - otherwise the popup's only message to
+# somebody with an empty folder is "go elsewhere".
+import inspect as _inspect
+
+from avgui.quick_settings import QuickSettings
+
+_popup_source = _inspect.getsource(QuickSettings._open_loras)
+check("the popup offers Get more", "Get more" in _popup_source)
+check("which opens the same browser Settings uses",
+      "ModelBrowser" in _inspect.getsource(QuickSettings._get_loras)
+      and 'kind="LORA"'
+      in _inspect.getsource(QuickSettings._get_loras),
+      "one browser, not a second copy of it")
+check("and the list is rebuilt when it closes",
+      "chooser.reload()" in _inspect.getsource(QuickSettings._get_loras),
+      "a LoRA that has just arrived should be tickable without closing "
+      "the popup and opening it again")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

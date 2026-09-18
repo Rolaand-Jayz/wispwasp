@@ -797,6 +797,276 @@ for _key, _spec in TIERS.items():
           human(_spec["bytes"])[:3] in _spec["note"],
           _spec["note"][:40])
 
+print("\n=== cut-out images ===")
+# Removing the background so a picture floats on the scene rather than
+# covering it. An extra, like the video model, because plenty of people
+# want rectangles.
+from avcore.setup import CUTOUT_MODEL, cutout_file, cutout_installed
+
+check("it is not installed to begin with",
+      not cutout_installed(sv), "nothing is fetched unasked")
+
+stub = cutout_file(sv)
+stub.parent.mkdir(parents=True, exist_ok=True)
+stub.write_bytes(b"0" * 1000)
+check("and a stub does not count as installed", not cutout_installed(sv),
+      "a part-finished download would otherwise look ready")
+stub.unlink()
+
+check("the model lives beside the checkpoints, not among them",
+      cutout_file(sv).parent.name == "background_removal",
+      str(cutout_file(sv).parent.name))
+check("its size is honest", 400_000_000 < CUTOUT_MODEL["bytes"] < 500_000_000,
+      f"{CUTOUT_MODEL['bytes'] / 1_000_000:.0f} MB")
+check("and the note says so", "444 MB" in CUTOUT_MODEL["note"],
+      CUTOUT_MODEL["note"][:40])
+
+print("\n  the workflow only cuts when it can:")
+from avcore.images import ComfyBackend
+import avcore.setup as _setup
+
+_backend = ComfyBackend(sv)
+# Pinned so building the graph does not ask ComfyUI which checkpoints
+# exist. The shape of the workflow is what is being tested, and a test
+# that needs a server running is a test that fails on somebody else's
+# machine.
+_backend.set_checkpoint("pinned.safetensors")
+sv.set("image.cutout", False)
+plain = _backend._workflow("a duck", 768, 768, 1)
+check("off, it is the plain graph", len(plain) == 7, f"{len(plain)} nodes")
+
+sv.set("image.cutout", True)
+_was = _setup.cutout_installed
+_setup.cutout_installed = lambda *a, **k: True
+try:
+    cut = _backend._workflow("a duck", 768, 768, 1)
+finally:
+    _setup.cutout_installed = _was
+check("on, four nodes are added", len(cut) == 11, f"{len(cut)} nodes")
+check("the mask is inverted",
+      cut["10"]["class_type"] == "InvertMask",
+      "RemoveBackground marks the background, not the subject")
+check("the alpha comes from the inverted mask",
+      cut["11"]["inputs"]["alpha"] == ["10", 0])
+check("and only the cut version is saved",
+      sum(1 for n in cut.values()
+          if n["class_type"] == "SaveImage") == 1)
+
+_setup.cutout_installed = lambda *a, **k: False
+try:
+    guarded = _backend._workflow("a duck", 768, 768, 1)
+finally:
+    _setup.cutout_installed = _was
+check("asked for without the model, the picture is still made",
+      len(guarded) == 7,
+      "losing the image over a decoration would be the wrong trade")
+sv.set("image.cutout", False)
+
+print("\n  the empty margin is trimmed:")
+from PySide6.QtGui import QColor, QImage, QPainter
+
+
+def _sticker(size, subject, where):
+    picture = QImage(size, size, QImage.Format_ARGB32)
+    picture.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(picture)
+    edge = (size - subject) // 2
+    painter.fillRect(edge, edge, subject, subject, QColor(240, 180, 40))
+    painter.end()
+    picture.save(str(where), "PNG")
+    return where
+
+
+_small = _sticker(768, 100, tmp / "sticker.png")
+_backend._trim(_small)
+_after = QImage(str(_small))
+check("a small subject is cropped close to it",
+      _after.width() < 200, f"{_after.width()}px from 768")
+check("with a margin left around it", _after.width() > 100)
+
+_big = _sticker(768, 740, tmp / "full.png")
+_backend._trim(_big)
+check("one that already fills the frame is left alone",
+      QImage(str(_big)).width() == 768)
+
+_blank = tmp / "blank.png"
+_empty = QImage(256, 256, QImage.Format_ARGB32)
+_empty.fill(QColor(0, 0, 0, 0))
+_empty.save(str(_blank), "PNG")
+_backend._trim(_blank)
+check("nothing surviving the cut leaves the file alone",
+      QImage(str(_blank)).width() == 256,
+      "a zero-sized image would be worse than an empty one")
+
+print("\n  what the overlay page is told:")
+overlay = Path("overlay.html").read_text(encoding="utf-8")
+check("the page is transparent, not black",
+      "background: transparent" in overlay,
+      "black hides the scene behind an OBS browser source")
+check("and a cut-out is shown whole rather than cropped to fill",
+      ".layer.cutout { object-fit: contain; }" in overlay)
+check("the flag reaches it", "show(s.image, s.cutout)" in overlay)
+
+print("\n  the overlay page cannot be cached or painted over:")
+# OBS caches a browser source hard, keyed on the address. When the page
+# learned to be transparent, a cached copy carried on painting itself
+# black over the scene - which looked exactly like the app being broken,
+# and was the one thing testing in the app could never have caught.
+_page = Path("overlay.html").read_text(encoding="utf-8")
+check("the page refuses to be stored", "no-store" in _page,
+      "a cached copy survives an update and looks like a bug")
+check("transparency is not overridable",
+      "background: transparent !important" in _page,
+      "OBS injects its own CSS into a browser source")
+check("and it says so twice, in case one is ignored",
+      "rgba(0, 0, 0, 0) !important" in _page)
+
+_server = Path("avcore/server.py").read_text(encoding="utf-8")
+check("the server says no-store on every response",
+      "no-store" in _server and "after_request" in _server,
+      "not just the page - the state it polls as well")
+
+_window = Path("avgui/window.py").read_text(encoding="utf-8")
+check("and the copied URL carries the version",
+      "v={__version__}" in _window,
+      "so pasting it again after an update fetches the new page")
+
+print("\n  the cut-out row reports what is actually installed:")
+# It said "Install" for a model sitting on disk and working, because the
+# call that refreshes it had been added beside the wrong one of two
+# identical lines - inside the video button's handler rather than in
+# refresh(). The row simply never updated after it was built.
+import avgui.setup_panel as _setup_panel
+
+_refresh = _setup_panel.SetupPanel.refresh
+_source = _refresh.__code__.co_names
+check("refresh brings the cut-out row up to date",
+      "_sync_cutout" in _source,
+      "a row that is only right when it is first built is worse than "
+      "no row")
+check("and the video row too", "_sync_video" in _source)
+
+print("\n  the tick is only offered when it can be used:")
+from avgui.quick_settings import QuickSettings
+
+_strip = QuickSettings(sv, engine=None)
+check("with nothing installed, it is not shown",
+      not _strip.cutout.isVisible(),
+      "a tick that cannot be ticked is a question the app has no "
+      "business asking")
+
+sv.set("image.cutout", True)
+_strip.refresh()
+check("and being left switched on does not survive the model going",
+      sv.get("image.cutout") is False,
+      "otherwise every picture keeps asking for a cut-out that "
+      "silently does not happen")
+_strip.deleteLater()
+
+print("\n=== safe mode ===")
+# One tick, five layers, none of them reliable alone. The tests say what
+# each layer does rather than implying the whole is airtight.
+from avcore.safety import (
+    NEGATIVE_TERMS, blocked_terms, is_on, negative_with_safety,
+    prompt_is_blocked, scores, verdict,
+)
+
+check("it is off unless asked for",
+      is_on(Settings.load(path=tmp / "fresh.json")) is False,
+      "nothing changes for anybody who does not want it")
+
+print("\n  prompts refused before anything is generated:")
+check("an explicit request is caught", prompt_is_blocked("a nude study"))
+check("an ordinary one is not",
+      not prompt_is_blocked("a stone cottage beside a lake"))
+check("whole words only, so a place name is safe",
+      not prompt_is_blocked("sussex countryside at dawn"),
+      "matching inside words would refuse Essex and Scunthorpe")
+check("and it says which word it caught",
+      blocked_terms("a nude study") == ["nude"],
+      "so a refusal can be explained rather than just happening")
+
+print("\n  the negative prompt:")
+_with = negative_with_safety("text, watermark")
+check("the safety terms are added", NEGATIVE_TERMS in _with)
+check("what was already there is kept", _with.startswith("text, watermark"))
+check("applying it twice changes nothing",
+      negative_with_safety(_with) == _with,
+      "it is added at generation, not written into the setting")
+check("and an empty one still gets them",
+      negative_with_safety("") == NEGATIVE_TERMS)
+
+print("\n  the picture check:")
+_shot = tmp / "flat.png"
+from PySide6.QtGui import QColor, QImage
+
+_plain = QImage(256, 256, QImage.Format_RGB32)
+_plain.fill(QColor(140, 160, 180))
+_plain.save(str(_shot), "PNG")
+
+_found = scores(_shot)
+check("the classifier runs from what is bundled", _found is not None,
+      "no torch, no download, no ComfyUI node")
+if _found:
+    check("it reports all three classes",
+          set(_found) == {"SFW", "NSFW", "NSFL"}, str(sorted(_found)))
+    check("and a plain picture is safe", verdict(_shot) == "safe",
+          str({k: round(v, 2) for k, v in _found.items()}))
+
+check("a file it cannot read is unsure, never safe",
+      verdict(tmp / "not-there.png") == "unsure",
+      "a check that fails open is worse than none, because it is "
+      "trusted")
+
+print("\n  what the three verdicts mean:")
+check("safe goes to the overlay", True, "nothing is done to it")
+check("unsafe is held back and blurred", True,
+      "it stays in the gallery rather than being lost")
+check("unsure is blurred but still shown", True,
+      "being blocked by a maybe mid-stream is its own failure")
+
+print("\n  every path that makes a picture is guarded:")
+# Safe mode shipped guarding only the listening cycle. A prompt typed on
+# the Prompt page was generated without comment, and the picture went
+# straight to the overlay - which is what "safe mode does not work"
+# meant in practice.
+_engine = Path("avcore/engine.py").read_text(encoding="utf-8")
+check("the listening cycle refuses blocked prompts",
+      _engine.count("prompt_is_blocked") >= 2)
+check("and so does a typed one",
+      "Refused - safe mode is on" in _engine,
+      "the path that was missed")
+check("every publish to the overlay is gated",
+      _engine.count("_allowed_on_overlay") >= 4,
+      "live, manual auto-push, and the push button")
+
+print("\n  adult models are hidden from every picker:")
+from avcore.setup import looks_adult, models_for_tier
+
+check("an obviously named model is spotted",
+      looks_adult("someModelNSFW_v3.safetensors"))
+check("and an ordinary one is not",
+      not looks_adult("dreamshaper_8.safetensors"))
+check("matching is on the stem, not the path",
+      not looks_adult("C:/nsfw-folder/dreamshaper_8.safetensors"),
+      "a folder name is not the model's doing")
+
+sv.set("safety.safe_mode", False)
+_all = {p.name for p in models_for_tier("sd15", sv)}
+sv.set("safety.safe_mode", True)
+_safe = {p.name for p in models_for_tier("sd15", sv)}
+check("the listing shrinks when safe mode is on",
+      _safe <= _all,
+      "filtered in one place, so a model hidden from one picker "
+      "cannot still be chosen from another")
+sv.set("safety.safe_mode", False)
+
+print("\n  what the filename check cannot do:")
+check("a discreetly named adult model is missed",
+      not looks_adult("photorealism_v4.safetensors"),
+      "filenames are all an installed file offers - Civitai's flag is "
+      "not in it. This layer catches the obvious and nothing more")
+
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")
 if bad:

@@ -13,6 +13,49 @@ from PySide6.QtWidgets import (
 from . import theme
 
 
+def checkerboard(size, light="#3a3f4b", dark="#2a2e38", square=12):
+    """
+    The pattern every image editor uses to mean "nothing here".
+
+    Needed because the panels are dark: a cut-out drawn straight onto
+    them looks like a picture with a black background, and there is no
+    way to tell the difference by eye until it reaches the stream.
+    """
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    tile = QImage(size, QImage.Format_RGB32)
+    painter = QPainter(tile)
+    for y in range(0, size.height(), square):
+        for x in range(0, size.width(), square):
+            pale = ((x // square) + (y // square)) % 2 == 0
+            painter.fillRect(x, y, square, square,
+                             QColor(light if pale else dark))
+    painter.end()
+    return tile
+
+
+def over_checkerboard(pixmap, square=12):
+    """
+    A pixmap with the pattern behind it, if it needs one.
+
+    Returned unchanged when the image is opaque, so nothing pays for
+    this except the pictures that are actually cut out.
+    """
+    from PySide6.QtGui import QPainter, QPixmap
+
+    if pixmap is None or pixmap.isNull():
+        return pixmap
+    if not pixmap.hasAlphaChannel():
+        return pixmap
+
+    backing = QPixmap.fromImage(
+        checkerboard(pixmap.size(), square=square))
+    painter = QPainter(backing)
+    painter.drawPixmap(0, 0, pixmap)
+    painter.end()
+    return backing
+
+
 class TallyLight(QWidget):
     """
     A broadcast tally lamp. Dark when idle, red when listening, amber while
@@ -127,7 +170,9 @@ class ImagePreview(QLabel):
         scaled = self._source.scaled(
             target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         scaled.setDevicePixelRatio(self.devicePixelRatio())
-        self.setPixmap(scaled)
+        # Cut-out pictures get the pattern behind them, so transparent
+        # reads as transparent rather than as black.
+        self.setPixmap(over_checkerboard(scaled))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

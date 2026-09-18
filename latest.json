@@ -1,8 +1,8 @@
 {
-  "version": "0.1.8",
-  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.8/WispWasp-0.1.8-setup.exe",
+  "version": "0.1.9",
+  "url": "https://github.com/sucretown/wispwasp/releases/download/v0.1.9/WispWasp-0.1.9-setup.exe",
   "page": "https://github.com/sucretown/wispwasp/releases/latest",
-  "sha256": "4129cdb408a08bba6c83aee4bc403274f2d9d1d268ea505d836d3d1b87817acf",
-  "size": 82621381,
-  "notes": "Keyboard shortcuts, an About page, and download sizes that read correctly."
+  "sha256": "38244c4a95a69a44a4c30eddf6cfe69756beddef5a6909c797dfe04743a6db74",
+  "size": 93895405,
+  "notes": "Cut-out images, LoRAs, safe mode, and a transparent overlay."
 }

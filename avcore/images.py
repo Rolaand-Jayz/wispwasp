@@ -101,8 +101,16 @@ class ComfyBackend:
         restarted - the old model kept generating and the new choice
         looked as though it had been ignored.
         """
+        from .safety import is_on
+
+        # Keyed on safe mode as well as the setting. With "first found"
+        # the setting is blank either way, so a checkpoint resolved
+        # before the tick went on would have been handed back after it -
+        # the cache remembering exactly the answer that is no longer
+        # allowed.
         wanted = (self.s.get("comfyui.checkpoint") or "").strip()
-        if self._checkpoint and self._checkpoint_for == wanted:
+        token = (wanted, is_on(self.s))
+        if self._checkpoint and self._checkpoint_for == token:
             return self._checkpoint
 
         names = self.list_checkpoints()
@@ -112,30 +120,56 @@ class ComfyBackend:
                 "models\\checkpoints folder and restart it."
             )
 
+        # Safe mode filters the pickers, but "first found" never went
+        # through one - it asked ComfyUI for everything it had and took
+        # the first, which on this machine was an adult model that the
+        # lists were deliberately hiding. Filtering here closes that,
+        # because every path to a checkpoint comes through this method.
+        from .safety import is_on
+
+        if is_on(self.s):
+            from .setup import looks_adult
+
+            allowed = [n for n in names if not looks_adult(n)]
+            if not allowed:
+                raise GenerationError(
+                    "Safe mode is on and every installed model is "
+                    "flagged as adult. Install another model, or turn "
+                    "safe mode off in Settings."
+                )
+            names = allowed
+
         if wanted:
             q = wanted.lower()
             exact = [n for n in names if n.lower() == q]
             partial = [n for n in names if q in n.lower()]
+            # Falls back to the first allowed name rather than the first
+            # of everything: a model chosen before safe mode was turned
+            # on should not keep being used after it.
             self._checkpoint = (exact or partial or names)[0]
         else:
             self._checkpoint = names[0]
-        self._checkpoint_for = wanted
+        self._checkpoint_for = token
         return self._checkpoint
 
     def set_checkpoint(self, name):
         self._checkpoint = name
         # Set by hand rather than resolved, so it is pinned until the
         # setting itself changes.
-        self._checkpoint_for = (self.s.get("comfyui.checkpoint") or "").strip()
+        from .safety import is_on
+
+        self._checkpoint_for = (
+            (self.s.get("comfyui.checkpoint") or "").strip(),
+            is_on(self.s))
 
     def _workflow(self, prompt, width, height, seed):
-        return {
+        graph = {
             "1": {"class_type": "CheckpointLoaderSimple",
                   "inputs": {"ckpt_name": self.checkpoint()}},
             "2": {"class_type": "CLIPTextEncode",
                   "inputs": {"text": prompt, "clip": ["1", 1]}},
             "3": {"class_type": "CLIPTextEncode",
-                  "inputs": {"text": self.s.get("image.negative_prompt", ""),
+                  "inputs": {"text": self._negative(),
                              "clip": ["1", 1]}},
             "4": {"class_type": "EmptyLatentImage",
                   "inputs": {"width": width, "height": height,
@@ -155,6 +189,189 @@ class ComfyBackend:
                   "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
             "7": {"class_type": "SaveImage",
                   "inputs": {"images": ["6", 0],
+                             "filename_prefix": "WispWasp"}},
+        }
+        graph = self._with_loras(graph)
+        if self._cutting():
+            graph.update(self._cutout_nodes())
+        return graph
+
+    def chosen_loras(self):
+        """
+        The LoRAs that are switched on, in the order they are listed.
+
+        Order matters: each one is applied on top of the last, and two
+        that pull in different directions give a different picture
+        depending on which goes first.
+
+        Anything no longer on disk is skipped rather than passed to
+        ComfyUI, which would fail the whole job over a file somebody
+        deleted months ago.
+        """
+        from .models import installed
+        from .setup import loras_dir
+
+        chosen = self.s.get("comfyui.loras") or []
+        if not isinstance(chosen, list):
+            return []
+
+        try:
+            present = {path.name for path in installed(loras_dir(self.s))}
+        except Exception:
+            present = set()
+
+        live = []
+        for entry in chosen:
+            if not isinstance(entry, dict) or not entry.get("on"):
+                continue
+            name = (entry.get("name") or "").strip()
+            if not name or name not in present:
+                continue
+            try:
+                strength = float(entry.get("strength", 1.0))
+            except (TypeError, ValueError):
+                strength = 1.0
+            live.append((name, max(-4.0, min(4.0, strength))))
+        return live
+
+    def _with_loras(self, graph):
+        """
+        Chain a LoraLoader for each one, between the checkpoint and
+        everything that uses it.
+
+        Both the model and the text encoder have to come through the
+        chain: a LoRA that changes only the model and not the CLIP
+        produces something that half-remembers the style it was asked
+        for, which is worse than not applying it at all.
+        """
+        loras = self.chosen_loras()
+        if not loras:
+            return graph
+
+        model_from = ["1", 0]
+        clip_from = ["1", 1]
+        for index, (name, strength) in enumerate(loras):
+            node = f"2{index}"
+            graph[node] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "lora_name": name,
+                    "strength_model": strength,
+                    "strength_clip": strength,
+                    "model": model_from,
+                    "clip": clip_from,
+                },
+            }
+            model_from = [node, 0]
+            clip_from = [node, 1]
+
+        # Everything downstream now reads from the end of the chain.
+        graph["2"]["inputs"]["clip"] = clip_from
+        graph["3"]["inputs"]["clip"] = clip_from
+        graph["5"]["inputs"]["model"] = model_from
+        return graph
+
+    def _trim(self, path):
+        """
+        Crop a cut-out down to what is actually in it.
+
+        The model puts the subject wherever it likes in the frame, and a
+        rubber duck occupying two percent of a 768 square is a sticker
+        that is almost entirely nothing. On the overlay, where the
+        picture is shown whole rather than cropped to fill, that empty
+        margin is what decides how small the subject looks.
+
+        Left alone if the picture is nearly all subject already, so the
+        common case costs nothing.
+        """
+        from PySide6.QtGui import QImage
+
+        picture = QImage(str(path))
+        if picture.isNull() or not picture.hasAlphaChannel():
+            return path
+
+        # Sampled rather than exhaustive: every fourth pixel is plenty to
+        # find an edge, and a full scan of a large image is slow enough
+        # to notice in a twenty second cycle.
+        step = 4
+        left, top = picture.width(), picture.height()
+        right = bottom = 0
+        for y in range(0, picture.height(), step):
+            for x in range(0, picture.width(), step):
+                if picture.pixelColor(x, y).alpha() > 24:
+                    left = min(left, x)
+                    right = max(right, x)
+                    top = min(top, y)
+                    bottom = max(bottom, y)
+
+        if right <= left or bottom <= top:
+            return path            # nothing survived the cut
+
+        pad = max(8, int(min(picture.width(), picture.height()) * 0.02))
+        left = max(0, left - pad)
+        top = max(0, top - pad)
+        right = min(picture.width() - 1, right + pad)
+        bottom = min(picture.height() - 1, bottom + pad)
+
+        width = right - left + 1
+        height = bottom - top + 1
+        if width >= picture.width() * 0.9 and height >= picture.height() * 0.9:
+            return path            # already fills the frame
+
+        picture.copy(left, top, width, height).save(str(path), "PNG")
+        return path
+
+    def _negative(self):
+        """
+        The negative prompt, with the safety terms while safe mode is on.
+
+        Added here rather than written into the setting, so turning safe
+        mode off gives back exactly the negative prompt somebody chose
+        rather than one this app has edited behind them.
+        """
+        from .safety import is_on, negative_with_safety
+
+        written = self.s.get("image.negative_prompt", "")
+        return negative_with_safety(written) if is_on(self.s) else written
+
+    def _cutting(self):
+        """
+        Should the background be removed from this image?
+
+        Both the setting and the model have to be there. Asking for a
+        cut-out without the model would fail the whole job, and losing
+        the picture because of a decoration would be the wrong trade.
+        """
+        from .setup import cutout_installed
+
+        if not self.s.get("image.cutout", False):
+            return False
+        return cutout_installed(self.s)
+
+    def _cutout_nodes(self):
+        """
+        Four nodes that turn the picture into a sticker.
+
+        The mask is inverted on the way through: RemoveBackground marks
+        the background rather than the subject, so joining it straight
+        onto the image gives a transparent teapot in an opaque room.
+        """
+        from .setup import CUTOUT_MODEL
+
+        return {
+            "8": {"class_type": "LoadBackgroundRemovalModel",
+                  "inputs": {"bg_removal_name": CUTOUT_MODEL["name"]}},
+            "9": {"class_type": "RemoveBackground",
+                  "inputs": {"bg_removal_model": ["8", 0],
+                             "image": ["6", 0]}},
+            "10": {"class_type": "InvertMask",
+                   "inputs": {"mask": ["9", 0]}},
+            "11": {"class_type": "JoinImageWithAlpha",
+                   "inputs": {"image": ["6", 0], "alpha": ["10", 0]}},
+            # Replaces node 7 rather than adding beside it, so only the
+            # cut-out version is written.
+            "7": {"class_type": "SaveImage",
+                  "inputs": {"images": ["11", 0],
                              "filename_prefix": "WispWasp"}},
         }
 
@@ -227,6 +444,10 @@ class ComfyBackend:
         v.raise_for_status()
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(v.content)
+        if self._cutting():
+            # Only cut-outs have a margin worth removing, and only they
+            # are shown whole rather than cropped to fill.
+            self._trim(dest)
         return dest
 
     def interrupt(self):

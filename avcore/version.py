@@ -8,7 +8,7 @@ filename typed out separately - two places to change and one of them
 easy to forget.
 """
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 # Where the app looks to find out whether a newer build exists. Filled
 # in once the releases are published; an empty value simply means the
@@ -36,12 +36,17 @@ AUTHOR = "Cinnamoroll"
 # here rather than parsed out of the release notes so that the app can
 # say what it is without reaching for the network.
 CHANGES = [
-    "Keyboard shortcuts you can change, under Settings then Customize.",
-    "Download sizes now read correctly - a 6.9 GB model said 6.5 GB, and "
-    "anything over 2 GB could show a negative total.",
-    "Animate a gallery picture into a short clip, if you turn it on in "
-    "Setup.",
-    "Clips play in the gallery with pause, scrubbing and mute.",
+    "Cut-out images: remove the background so a picture floats on your "
+    "scene instead of covering it. Turn it on in Setup.",
+    "Safe mode: one tick that steers away from explicit images, refuses "
+    "prompts asking for them, hides adult models, blurs anything it is "
+    "unsure about and keeps flagged pictures off the overlay.",
+    "LoRAs: browse, download and apply them, with a strength for each. "
+    "Ones that will not work say so in red.",
+    "A picker for SD 1.5 or SDXL beside the model, which lists only the "
+    "models that match.",
+    "The overlay page is transparent now, so OBS shows your scene "
+    "behind it rather than black.",
 ]
 
 

@@ -118,7 +118,12 @@ class Filters:
         made before the catalogue existed - those simply have no prompt to
         match against.
         """
-        if self.kind == "video":
+        if self.kind == "transparent":
+            from avcore.catalog import has_transparency
+
+            if not has_transparency(path):
+                return False
+        elif self.kind == "video":
             # One entry covering every clip format, because nobody
             # filters by container.
             if path.suffix.lower() not in (".webm", ".mp4"):

@@ -983,6 +983,36 @@ convention - is still outstanding.
 
 ---
 
+## Safe mode
+
+One tick, five layers, none reliable alone. Safety terms on the negative
+prompt; blocked words refused before generating; adult models hidden;
+every picture scored by a bundled classifier; anything flagged blurred
+in the gallery and kept off the overlay. Off by default.
+
+**The layers that matter are the deterministic ones.** The classifier is
+probabilistic and its true-positive rate is unmeasured here - there was
+no honest way to test it without generating the thing it is meant to
+catch. What can be relied on is the model filter and the prompt gate,
+and a checkpoint merged for explicit output defeats everything else.
+
+The first version of this was barely connected, and the pattern is worth
+remembering: every hole was a quieter route to the same place. The
+listening cycle refused blocked prompts while typed ones sailed through.
+The pickers hid adult models while "first found" asked ComfyUI directly
+and took its first answer - which was the adult model the lists were
+hiding. The checkpoint cache was keyed on the setting, which stays blank
+for "first found" either way, so a model resolved before the tick went
+on was handed back after it. Guard where the decision is made, not where
+it is displayed.
+
+The safety terms are added when a picture is generated, never written
+into ``image.negative_prompt``, so turning safe mode off gives back
+exactly the wording somebody chose. That is right and invisible, which
+is its own fault - hence the line under the Avoid field saying what is
+being added. It refreshes when settings *land*, not when the tick moves,
+because Settings holds changes until Apply.
+
 ## Keyboard shortcuts
 
 Single keys on the Live and Prompt pages, changed under Settings then

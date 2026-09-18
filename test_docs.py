@@ -285,9 +285,17 @@ check("every link is https",
           for url in (ISSUES_PAGE, SOURCE_PAGE, RELEASES_PAGE)))
 
 print("\n  what the notes say matches this version:")
-check("the changes mention the newest feature",
-      any("shortcut" in line.lower() for line in CHANGES),
-      "the page claims to describe this version")
+# Checked by shape rather than by keyword. The first version of this
+# named the feature of the day, so every release broke it and the fix
+# was always to retype the keyword - which tests nothing except that
+# somebody retyped the keyword.
+check("the changes read as sentences, not a commit log",
+      all(line[0].isupper() and len(line.split()) >= 6
+          for line in CHANGES),
+      "the About page shows these to a person")
+check("and none is left over from an older release",
+      not any(line.strip().startswith("-") for line in CHANGES),
+      "a stale bullet would be worse than an empty list")
 
 bad = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(bad)}/{len(results)} passed")

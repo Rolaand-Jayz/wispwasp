@@ -167,7 +167,8 @@ def _parse(item):
     )
 
 
-def search(query="", base_model="SD 1.5", include_adult=False, limit=20,
+def search(query="", base_model="SD 1.5", include_adult=False,
+           limit=20, kind="Checkpoint",
            api_key=None, opener=None):
     """
     Ask the catalogue what is available.
@@ -179,7 +180,9 @@ def search(query="", base_model="SD 1.5", include_adult=False, limit=20,
     """
     params = {
         "limit": str(max(1, min(int(limit), 100))),
-        "types": "Checkpoint",
+        # Checkpoint or LORA. Civitai calls them the same way; only
+        # this word and the folder they land in differ.
+        "types": kind,
         "sort": "Highest Rated",
     }
     wanted = BASE_MODELS.get(base_model)

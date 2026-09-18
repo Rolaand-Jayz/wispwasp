@@ -143,6 +143,10 @@ class AboutPanel(QWidget):
             from avcore.setup import checkpoints_dir
 
             places.append(("Models", checkpoints_dir(self.s)))
+
+            from avcore.setup import loras_dir
+
+            places.append(("LoRAs", loras_dir(self.s)))
         except Exception:
             pass
 

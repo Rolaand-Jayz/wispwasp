@@ -25,7 +25,7 @@ from avcore.catalog import model_label
 
 from .filters import DATE_RANGES, SOURCES, Filters
 from .viewer import ImageViewer
-from .widgets import HoverCaption, TriStateFilter
+from .widgets import over_checkerboard, HoverCaption, TriStateFilter
 
 # Clips sit in the same folder as the pictures they were made from, so
 # the gallery is one place rather than two.
@@ -89,6 +89,9 @@ class Thumb(QWidget):
                               Qt.SmoothTransformation)
             if self.censored:
                 shown = self._blurred(shown)
+            # Same pattern as the preview: a cut-out on a dark tile is
+            # indistinguishable from a picture with a black background.
+            shown = over_checkerboard(shown, square=8)
             self.image.setPixmap(shown)
         self.image.set_favourite(bool(self.entry.get("favourite")))
         self.image.cog_clicked.connect(self._open_menu)
@@ -687,6 +690,9 @@ class GalleryPanel(QWidget):
         # detail, and someone looking for their clips is not thinking
         # about containers.
         self.kind_pick.addItem("Video", "video")
+        # Cut-outs, which are worth finding as a group: they are the
+        # ones that can go on a stream without covering it.
+        self.kind_pick.addItem("Transparent", "transparent")
         for ext in (".png", ".jpg", ".jpeg", ".webp"):
             if ext in VIDEO_EXTS:
                 continue      # covered by the Video entry above
